@@ -1,0 +1,495 @@
+---
+title: "ECON 430 Homework 2"
+author: "Gefei Zhao"
+date: "2020/10/21"
+output: pdf_document
+---
+# Question 1
+The dataset train.csv contains 79 explanatory variables. The data description and csv file
+can be downloaded directly from kaggle(https://www.kaggle.com/c/house-prices-advanced-regression-techniques/data). Your task, as suggested on the kaggle website, is to
+build a model to predict final home prices. Note, this is part of a kaggle competition which
+you might consider participating in later on. Before you start the parts below, identify any
+10 variables of your choice and write a brief paragraph of why you selected them. These are
+the predictors you will use for solving the problem.
+
++ Importing Libraries and Pre-processing Data
+
+```{r setup, include=FALSE}
+# dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+# include = TRUE/FLASE to display/suppress the code in the chunk
+# knitr::opts_chunk$set(echo = TRUE)
+# echo - Display code in output document (default = TRUE)
+# knitr::opts_knit$set(root.dir = dir) 
+# sets the working directory where R reads from and writes to
+# dir is the folder in which the Rmarkdown document is
+```
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+# import required libraries
+library(dplyr)
+library(corrplot) # correlation plot
+library(car)
+library(psych)
+library(ggplot2)
+library(olsrr)
+library(leaps)
+library(lmtest)
+library(caret)
+library(DAAG)
+library(tseries)
+library(stargazer) # make latex tables
+library(caTools) 
+library(forecast)
+library(multcomp)
+
+# input data
+train <- read.csv("train.csv", header = TRUE)
+test <- read.csv("test.csv", header = TRUE)
+```
++ Choosing Variables
+I choose the following variables:
+
+From my view, *space*, *location* and *physical characteristics* of houses are the most important and influential aspects of home price. As for spcace, I choose the variable of area above ground, 'GrLivArea', basement area 'TotalBsmtSF' to measure. 
+
+Besides, I use the variables 'LandContour' and 'MSZoning' to measure the influence of location of house on home price.
+
+As for the physical characteristics of houses, I subjectively pick several important variables when choosing a house. We firstly look at the type of dwelling which is 'MSSubClass'. For a specific house, we basically care about the overall quality and the year of the house built. Furthermore, we might focus on details of the house such as garage capacity, the number of bedroom and the heating quality.
+
+```{r}
+# Select predictors from dataset
+var=c('GrLivArea', 'TotalBsmtSF', 'LandContour', 'MSZoning', 'MSSubClass', 
+      'OverallQual', 'YearBuilt', 'GarageCars', 'BedroomAbvGr', 'HeatingQC', 'SalePrice')
+
+df <- subset(train,select=var)
+attach(df)  # Variables in the data frame can be accessed by simply giving their names
+```
+
+## (a)
+### Summary Statistics
+```{r}
+describe(df)
+```
+From the summary statistics, we can found that:
+
+  **Sample Size:** 1460
+
+  **Quantitive Variables:** GrLivArea, TotalBsmtSF, SalePrice, MSSubClass, OverallQual, YearBuilt, GarageCars, BedroomAbvGr
+  
+  **Categorical Variables:** LandContour, MSZoning, HeatingQC
+  
+  Although "MSSubClass, OverallQual, YearBuilt, GarageCars, BedroomAbvGr" are quantitive variables, they are discrete variables. Therefore, the density plots and qq-plots are not plausible for these variables.
+  
+
+### Univariate Analysis
++ Continuous Variables
+```{r fig.height=6}
+# histograms
+par(mfrow = c(3,3))
+n <- 1460; k <- 1 + log2(n)
+
+hist(GrLivArea, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(GrLivArea),lwd = 2, col = 'red')
+hist(TotalBsmtSF, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(TotalBsmtSF),lwd = 2, col = 'red')
+hist(MSSubClass, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(MSSubClass),lwd = 2, col = 'red')
+hist(OverallQual, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(OverallQual),lwd = 2, col = 'red')
+hist(YearBuilt, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(YearBuilt),lwd = 2, col = 'red')
+hist(GarageCars, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(GarageCars),lwd = 2, col = 'red')
+hist(BedroomAbvGr, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(BedroomAbvGr),lwd = 2, col = 'red')
+hist(SalePrice, breaks = k, col='skyblue4', ylab = 'Density', probability = T)
+lines(density(SalePrice),lwd = 2, col = 'red')
+```
+Since overall quality, bedroom number, garage capacity, MSSubClass and year built are actually discrete variables, their density plots fluctuates a lot and are not normal distributed. However, we do not need to do transforms on these variables.
+
+For else continous variables, they have the same problem that the orders of magnitude of x axis is quite large compared to the density. We should do transforms in the next questions.
+
+
+```{r}
+# qqplots
+par(mfrow = c(1,3))
+
+qqPlot(~ GrLivArea, data = df)
+qqPlot(~ TotalBsmtSF, data = df)
+qqPlot(~ SalePrice, data = df)
+```
+We found there are significant upper tails for GrLivArea and SalePrcie. And there are also some distraction in lower tail for all three variables. Therefore, all of the continous variables are not nicely normal distributed.
+
+
++ Categorical Variables
+
+```{r}
+# barplots
+par(mfrow = c(2,4))
+barplot(table(LandContour), main = "Barplot of LandContour")
+barplot(table(MSZoning), main = "Barplot of MSZoning")
+barplot(table(HeatingQC), main = "Barplot of HeatingQC")
+barplot(table(MSSubClass), main = "Barplot of MSSubClass")
+barplot(table(OverallQual), main = "Barplot of OverallQual")
+barplot(table(YearBuilt), main = "Barplot of YearBuilt")
+barplot(table(GarageCars), main = "Barplot of GarageCars")
+barplot(table(BedroomAbvGr), main = "Barplot of BedroomAbvGr")
+```
+From the barplots, we can see the number of each category of different variables. 
+
+
+### Bivariate Analysis
++ Quantitive & Quantitive Variables
+
+```{r fig.height=4, warning=FALSE}
+# scatterplots
+par(mfrow=c(2,4))
+scatterplot(SalePrice ~ GrLivArea)
+scatterplot(SalePrice ~ TotalBsmtSF)
+scatterplot(SalePrice ~ MSSubClass)
+scatterplot(SalePrice ~ OverallQual)
+scatterplot(SalePrice ~ YearBuilt)
+scatterplot(SalePrice ~ GarageCars)
+scatterplot(SalePrice ~ BedroomAbvGr)
+```
+For continous variables, the points are concentrated in the lower left corner in the three plots. Combining the comments for histograms, it is necessary to do transforms on y axis because of the large orders of magnitude.
+
+**MSSubClass:** There are no significant linear relationship between type of dwelling and saleprice from the scatterplot.
+
+**OverallQual:** The spread and mean increase as the overall quality improved. Obviously, as the overall quality increases, the home price increases.
+
+**YearBuilt:** The data shows that the homeprice raises with slow growth as the year built becomes latest.
+
+**GarageCars:** There is a signficant increasing associated with an additional car capacity in the garage.
+
+**BedroomAbvGr:** Home prices raises slowly as the number of bedroom increases.
+
+
++ Categorical & Quantitive
+
+```{r}
+# boxplots
+par(mfrow = c(1,3))
+boxplot(SalePrice ~ MSZoning)
+boxplot(SalePrice ~ LandContour)
+boxplot(SalePrice ~ HeatingQC)
+```
+**MSZoning:** The homeprice of floating village residential and low density residential are the most expensive types. It is make sense because people prefer to live in low density community instead of crowded area.
+
+**LandContour:** HillSide houses are the most expensive category and the banked houses are the least worthy type. 
+
+**HeatingQC:** The sale prices increases as the heating quality increases.
+
+
++ Entire Model
+
+```{r}
+# correlation plot
+var_quantitive=c('GrLivArea', 'TotalBsmtSF', 'MSSubClass', 'OverallQual', 'YearBuilt', 'GarageCars', 'BedroomAbvGr', 'SalePrice')
+df_quantitive <- subset(train,select=var_quantitive)
+corrplot(cor(df_quantitive))
+```
+The corvariance between most of preditors and  dependent variables are positively strong. However, there are quite significant colinearity among some predictors. We would solve this problem in the later question.
+
+
+```{r fig.height=3.5}
+# scatterplot
+scatterplotMatrix(~ GrLivArea + TotalBsmtSF + SalePrice)
+```
+The scatterplot of the continous variables shows that there exit some relationship but the data points are too concentrated.
+
+
+## (b)
+
+```{r}
+par(mfrow = c(1,3))
+symbox(GrLivArea)
+symbox(SalePrice)
+symbox(TotalBsmtSF)
+```
+The outliers of GrLivArea and SalePrice are more even in log transformation. The transformation of TotalBsmtSF can not be decided from the symbox plot because the outliers spread of log or 0.5 power transformation are not even.
+
+```{r}
+summary(powerTransform(GrLivArea), data = df, family = 'bcPower')
+summary(powerTransform(SalePrice), data = df, family = 'bcPower')
+
+# Since there are 0 in the datasets of TotalBsmSF, we cannot use Box-Cox transformation.
+# We can use Yeo-Johnson transformation to deal with non-positive data.
+summary(powerTransform(cbind(TotalBsmtSF) ~ 1, data = df, family = 'yjPower'))
+```
+The results shows that we should do log tranformations for 'GrLivArea' and 'SalePrice' because it fail to reject null hypothesis(need a log transformation) and reject the null hypothesis(no need to do a transformation). And we should do power transformation for 'TotalBsmSF' and 'GarageArea' because it reject the null hypothesis.
+
+```{r fig.height=4}
+# scatterplot after transformation
+scatterplot(log(SalePrice) ~ log(GrLivArea))
+scatterplot(log(SalePrice) ~ yjPower(TotalBsmtSF, 0.7396))
+```
+After transformation, the data points are more spread out instead of concentrating in the left-down corner and the relationship between home price and its predictors are more linear and clear.
+
+
+## (c)
+
+```{r}
+reg.mod <- lm(log(SalePrice) ~ log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396) + LandContour
+              + MSZoning + MSSubClass + OverallQual + YearBuilt +  + GarageCars + BedroomAbvGr 
+              + HeatingQC, data = df)
+
+summary(reg.mod)
+```
++ Statisitical Significance
+
+  We can find from the regression results that the coefficients of all ten variables are statistical significant. Although one category of HeatingQC is not significant, it is plausible to ignore the unsignificance. Besides, adjusted $R^2$ is large, p-value is quite small and degrees of freedom is 1441. Therefore, our model is statistical significant.
+  
++ Economic Significance and interpretation (Holding else constant)
+
+$Intercept$: With other variables equal to zero or at the bottom line, the land price or some compulsive expenditures would be 4.961\% of te house price on average.
+
+$\beta_{log(GrLivArea)}$: It make sense that as living area above ground increases, home price increases. Additional 1\% of total square feet of living area is associated with 0.4519\% increases in home price on average.
+
+$\beta_{TotalBsmtSF}$: The estimate of coefficient indicates that square foot of basement increases, home price increase. Additional 1 square feet of basement is associated with 0.06672\% increases in home price on average.
+
+$\beta_{LandContour}$: The most worthy flatness of property is depression, and then is hillside, the third worthy one is level, the least worthy one is the base group banked. Compared banked property, depression property is worth more by 16.29\%. Compared banked property, hill side property is worth more by 12.7\%. Compared to banked property, flat property is worth more by 4.874\%. However, the results are kind of not economic significant because we can see that the hillside houses are the most expensive type from the statisitc summary and common sense.
+
+$\beta_{MSZoning}$: The baseline of MSZoning is the least worthy Commercial classification. People prefer to live in low density area instead of high density or crowed commercial area. The sale price of floating village is expensive than commercial property by 49.12\%. The sale price of high density residential is expensive than commercial property by 44.38\%. The sale price of low density residential is expensive than commercial property by 49.77\%. The sale price of medium density residential is expensive than commercial property by 38.68\%.
+
+$\beta_{MSSubClass}$: I think it is not economical significant because it hard to explain.
+
+$\beta_{OverallQual}$: People always prefer good quality houses. As the overall quality increases 1 level, the home price would increases by 9.034\%.
+
+$\beta_{YearBuilt}$: People also prefer to live in newly built houses because the equipments, furnitures and functionals are much better. Additional 1 year later of the houses built is associated with an increase of home price by 0.1288\% on average.
+
+$\beta_{GarageCars}$: The capacity of garage is another factors for people. It is really convenient to have more capacity of cars. Therefore, additional 1 car capacity in garage is associated with increases of home price by 7.634\% on average.
+
+$\beta_{BedroomAbvGr}$: The coefficient is not economic significant because it indicate more bedroom would cause less home price which is not plausible in really life.
+
+$\beta_{HeatingQC}$: It is economic significant because people would prefer excellent heating quality. Compared to excellent heating quality, the sale price of house with fair heating quality would decrease by 12.82\%. The sale price of house with good heating quality would less expensive than houses with excellent heating quality by 3.498\%. Samely, the sale price of house with average quality would decrease by 2.999\%. The house with poor heating quality is not statistic significant but it is economic significant, because it mean the sale price would decreases by 19.38\%.
+
+
+## (d)
+
+```{r}
+par(mfrow = c(2,2))
+plot(reg.mod, 1:4)
+```
+From the above plots, we can figure out four outliers which are 633, 524, 1299 and 31. Specifically, the outliers are which residuals smaller than -0.5.
+
+
+```{r}
+position = which(abs(reg.mod$resid) > 0.8)
+position
+```
+
+So we can remove the outliers using above functions.
+
+
+```{r}
+reg.mod_RemoveOutliers = lm(log(SalePrice) ~ log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396) + LandContour
+              + MSZoning + MSSubClass + OverallQual + YearBuilt +  + GarageCars + BedroomAbvGr 
+              + HeatingQC, data = df, subset = abs(reg.mod$resid) <= 0.8)
+
+summary(reg.mod_RemoveOutliers)
+```
+```{r}
+compareCoefs(reg.mod, reg.mod_RemoveOutliers)
+```
+
+After removing the outliers, the adjusted $R^2$ is larger and the standard error of all estimate coefficients are smaller.
+
+
+## (e)
+```{r}
+# use Mallow CP to decide remain which variables
+ss <- regsubsets(log(SalePrice) ~ log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396) + LandContour
+              + MSZoning + MSSubClass + OverallQual + YearBuilt + GarageCars + BedroomAbvGr + HeatingQC,
+              method = c("exhaustive"), nbest = 1, data = df, subset = abs(reg.mod$resid) <= 0.8)
+
+subsets(ss, statistic = "cp",legend = F, main = "Mallows CP")
+```
+The Mallow CP indicate that we should use log(GrLivArea), yjPower(TotalBsmtSF, 0.7396), MSZoning,  OverallQual, YearBuilt, GarageCars and BedroomAbvGr as our predictors. 
+
+```{r}
+# test for multicollinearity
+vif(reg.mod_RemoveOutliers)
+```
+Since there are multicolinearity in MSZoningFV, MSZoningRL and MSZoningRM(VIFs > 5), we should remove these in our model.
+
+All in all, we should remove MSZoning as well.
+
+```{r}
+# re-estimate the model
+reg.mod2 <- lm(log(SalePrice) ~ log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396) 
+               + OverallQual + YearBuilt + GarageCars + BedroomAbvGr,
+              data = df, subset = abs(reg.mod$resid) <= 0.5)
+summary(reg.mod2)
+```
+
+## (f)
+```{r}
+plot(reg.mod2, 1)
+```
+Although there are some outliers, the spread of residual is same and the mean of residul is almost zero.
+
+
+## (g)
+```{r}
+AIC(reg.mod, reg.mod2)
+BIC(reg.mod, reg.mod2)
+```
+According to the AIC and BIC, reg,mod2 is better because it has smaller AIC and BIC value.
+
+
+## (h)
+```{r}
+resettest(reg.mod2, power = 2)
+```
+The RESET test indicate that the model need quadratic terms to improve our model.
+
+
+```{r}
+model_reset2 <- lm(log(SalePrice) ~ (log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396)
+                                     + OverallQual + YearBuilt + GarageCars + BedroomAbvGr)^2
+                   , data = df, subset = abs(reg.mod$resid) <= 0.8)
+summary(model_reset2)
+```
+The regression results indicate that the quadratic term of overall quality and an interaction term of overall quality and year built is statistical significant. They are also economic significant because there is diminishing effect on overall quality and the overall quality and year built is related to some degree.
+
+
+```{r}
+# re-estimate the model
+reg.mod3 <- lm(log(SalePrice) ~ log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396) + OverallQual 
+               + I(OverallQual^2) + YearBuilt + OverallQual:YearBuilt + GarageCars + BedroomAbvGr, 
+               data = df, subset = abs(reg.mod$resid) <= 0.8)
+summary(reg.mod3)
+```
+```{r}
+compareCoefs(reg.mod, reg.mod2, reg.mod3)
+```
+Compared to previous two model, the model with quadratic terms are kind of not economic significant. The estimate coefficient of $OverallQual^2$ is positive, however, it should be negative because of the diminishing marginal effect of overall quality. And the intercept is negative, which is also irrational because there do exist some fixed cost on house sale. Among the three model, I prefer the model 2.
+
+
+## (i)
+```{r}
+cvResults <- suppressWarnings(CVlm(data = df, form.lm = reg.mod2, m=5,
+                                   dots = FALSE, seed = 1, legend.pos = "topleft",
+                                   printit = FALSE))
+```
+The fit don't vary too much with respect the slope and level. It indicates the model 2 fits good.
+
+
+```{r}
+train_control <- trainControl(method = "cv", number = 5, savePredictions = TRUE, returnResamp = "all")
+train(log(SalePrice) ~ log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396) + OverallQual 
+      + YearBuilt + GarageCars + BedroomAbvGr, data = df, subset = abs(reg.mod$resid) <= 0.8, 
+      trControl = train_control, method = "lm")
+```
+$R^2$ is large and RMSE is small, our model is good with 5-fold cv test.
+
+
+Next, we should do prediction to test the model using dataset "testing.csv". However, there are no data about saleprice which is the important dependent variables $y$. Therefore, I divided the training dataset to two datasets as new training and testing data sets.
+
+```{r}
+set.seed(123) 
+split = sample.split(train, SplitRatio = 0.8) 
+  
+training_set = subset(train, split == TRUE) 
+test_set = subset(train, split == FALSE)
+
+# train model
+reg.mod2_train <- lm(log(SalePrice) ~ log(GrLivArea) + yjPower(TotalBsmtSF, 0.7396) 
+               + OverallQual + YearBuilt + GarageCars + BedroomAbvGr,
+              data = training_set, subset = abs(reg.mod$resid) <= 0.8)
+
+# test model
+predict.test <- predict(reg.mod2_train, newdata = test_set)
+accuracy(exp(predict.test), test_set$SalePrice)
+```
+The average sale pice in dataset is \$180921.20. It is plausible for our dataset to have a RMSE of \$32706.32 on average. 
+
+```{r}
+result <- as.data.frame(cbind(test_set$GrLivArea, test_set$SalePrice, exp(predict.test)))
+names(result) <- c("GrLivArea", "SalePrice", "SalePrice.hat")
+
+ggplot(result, aes(x=GrLivArea)) + geom_point(aes(y=SalePrice)) + geom_line(aes(y=SalePrice, color="red")) + geom_point(aes(y=SalePrice.hat)) + geom_line(aes(y=SalePrice.hat, color="cyan"))
+```
+From the plot, we can figure out the predicted sale price is close to the real sale price, although the real data is more fluctuate than predicted data. Therefore, the model 2 performs good.
+
+
+# Question 2
+
+Assume a healthcare insurance company hired you as a consultant to develop an econometric
+model to estimate the number of doctor visits a patient has over a 3 month period. The
+rational behind this study is that patients with a higher number of doctors visits wold pose
+a higher liability in terms of insurance expenses, and therefore, this may be mitigated via a
+higher insurance premium. The panel data are from the German Health Care Usage Dataset,
+and consist of 7,293 individuals across varying numbers of periods with a total of 27,326
+observations.
+
+
+```{r}
+#import data
+health <- read.csv("german_healthcare_usage.csv", header = TRUE)
+attach(health)
+```
+## (a)
+The number of people visiting doctors last three month is a reflection of their health. So, the basic indicators for health are people's health satisfaction, degree of handicap and their age. 
+
+Specifically, I purpose age has a positive quadractic term. It is  because that when young people growing up, their immune systems getting stronger so that they seldom visit doctors and the aged people would more frequently visit doctors as their ages increase. And the numer of person go to hosipital lase year also can indirectly reflect their health conditions. 
+
+Besides, people who go to hospital more frequently last year might also have a insurance so that they can pay by the insurance. Therefore, the number of hospital visiting is associated with whether a person has public insurance. An interaction is necessary to add in our model.
+
+The health conditions might differ from group, such as different type of occupations(blue collar, white collar and selfemployed) and gender(female and male). We can add these indicator variables into our model to figure out the relationship among groups.
+
+```{r}
+reg.model <- lm(DOCVIS ~ AGE + I(AGE^2) + HOSPVIS + NEWHSAT + HANDPER + PUBLIC + HOSPVIS:PUBLIC + FEMALE
+                + BLUEC + WHITEC, data = health)
+summary(reg.model)
+```
+Although the ajusted $R^2$ is not good, the significance of coefficients, p-value and degree of freedom perform good. 
+
+As health satisfication increases, the number of visiting doctors decreases. As the degree of handicap increases, the number of visiting doctors increases.
+
+Just as I purposed, age needs an quadratic term and the coefficient is positive. There is no significant difference between different type of occupation but do have difference between men and women. The regression indicates females visit doctors more frequently than males by 0.94 times.
+
+Additional 1 time visiting the hospital last year is associated with an increase of the number of visiting doctors last three month by 0.26 times on average. And people with public insurance would visit doctors more frequently in last three month by 0.308 times compared to people without public health insurance. Addtional 1 time of people with an insurance go to hosptial last year is associated with 0.39 times more visiting doctors last three month compared to people wo don't have public insurance.
+
+
+## (b)
+### i.
+```{r}
+health$POLICY[health$YEAR < 1987] = 0
+health$POLICY[health$YEAR >= 1987] = 1
+```
+
+$$DOCVIS=\beta_1+\delta_1FEMALE+\delta_2POLICY+\gamma FEMALE*POLCY+e$$
+$\gamma$ is the difference-in-difference estimator.
+```{r}
+did.mod1 <- lm(DOCVIS ~ FEMALE + POLICY + FEMALE:POLICY, data = health)
+summary(did.mod1)
+
+```
+The coefficients of POLICY and FEMALE:POLICY are not statistical significant. The policy did not work for women.
+
+### ii.
+$$DOCVIS=\beta_1+\delta_1UNEMPOLY+\delta_2POLICY+\gamma UNEMPOLY*POLICY+e$$
+```{r}
+did.mod2 <- lm(DOCVIS ~ UNEMPLOY + POLICY + UNEMPLOY:POLICY, data = health)
+summary(did.mod2)
+```
+The coefficients of POLICY and UNEMPOLY:POLICY are not statistical significant. The policy did not work for unemployed.
+
+## (c)
+$$H_0: \beta_{female}>0 \quad H_1: \beta_{female} \leq 0$$
+```{r}
+mod <- lm(DOCVIS ~ FEMALE, data = health)
+summary(mod)
+linearHypothesis(mod, "FEMALE = 1.16538")
+```
+We fail to reject null hypothesis so that women go to doctors more times than men on average.
+
+## (d)
+I want to test the number of doctor visiting last 2 month if a person's degree of health satisfication decreases by 1 level and the number of the hospital visiting last year increases by 2 times.
+```{r}
+mod2 <- lm(DOCVIS ~ NEWHSAT + HOSPVIS, data= health)
+
+summary(glht(mod2, linfct=c( "-1*NEWHSAT + 2*HOSPVIS = 0")))
+```
+We estimate that the number of doctor visiting would increases 2.15 times on average.

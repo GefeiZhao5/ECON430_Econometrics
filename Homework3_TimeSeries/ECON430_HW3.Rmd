@@ -1,0 +1,802 @@
+---
+title: "ECON 430 Homework 3"
+author: "Gefei Zhao"
+date: "2020/11/24"
+output:
+  pdf_document: 
+    keep_tex: yes
+    toc: yes
+    toc_depth: 3
+header-includes:
+   - \usepackage{dcolumn}    
+classoption: letterpaper
+---
+\newpage
+
+# 1. Introduction
+
+The dataset from [FRED](https://fred.stlouisfed.org/series/S4248SM144NCEN) provides data of alcohol sales in U.S. from January 1992 to September 2020. 
+
+```{r include=FALSE}
+# fix default of language to English
+Sys.setenv(LANGUAGE = "en")
+
+# load libraries
+library(tseries)
+library(stargazer)
+library(forecast)
+library(ggplot2)
+```
+
+```{r include=FALSE}
+# set working document
+setwd('C:/Users/Gefei Zhao/Desktop/UCLA/430/Homework/Homework 3-20201117')
+
+# import training data
+df <- read.table("S4248SM144NCEN.csv", sep = ",", head = T)
+
+# rename the variable
+names(df) <- c("date", "alcohol")
+```
+
+```{r eval=FALSE, include=FALSE}
+# summary statistics
+stargazer(df)
+```
+\begin{table}[!htbp] \centering 
+  \caption{} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lccccccc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+Statistic & \multicolumn{1}{c}{N} & \multicolumn{1}{c}{Mean} & \multicolumn{1}{c}{St. Dev.} & \multicolumn{1}{c}{Min} & \multicolumn{1}{c}{Pctl(25)} & \multicolumn{1}{c}{Pctl(75)} & \multicolumn{1}{c}{Max} \\ 
+\hline \\[-1.8ex] 
+alcohol & 345 & 8,221.270 & 3,159.680 & 3,031 & 5,353 & 10,616 & 16,215 \\ 
+\hline \\[-1.8ex] 
+\end{tabular} 
+\end{table} 
+
+# 2. Results
+
+## 2.1 Modeling and Forecasting Trend
+
+### (a) Time Series Plot
+```{r echo=FALSE}
+# convert data to time series formate
+ts <- ts(df$alcohol, start = c(1992, 1), frequency = 12)
+t <- seq(1992, 2020.75, length = length(ts))
+alco_df <- cbind.data.frame(t, ts)
+
+plot(ts, xlab = "Time", ylab = "Monthly Alcohol Sales")
+tis::nberShade() # add recession bands
+lines(ts)  
+```
+The times series have significant trend and seasonality.
+
+
+### (b) Covariance Stationary
+
+The time series is not covariance stationary. Its mean and variance are not constant but increasing over time. It has significant trend and seasonality and not a mean-reverting pattern.
+
+
+### (c) ACF and PACF
+
++ ACF Plot
+
+```{r echo=FALSE, fig.height=3.5}
+# ACF
+acf(df$alcohol, lag = 60, main = "ACF plot")
+## Notice: Do not use the data of time series format to do the ACF and PACF plot,
+## the x axis which is lag operater would be non-integer
+```
+Autocorrelations are large, so there is high dependence on how alcohol sales have changed overtime. Besides, there is an sudden increase for every 12 lag operator, indicating the time series exist highly seasonality.
+
+
++ PACF Plot
+
+```{r echo=FALSE, fig.height=3.5}
+# PACF
+pacf(df$alcohol, lag = 60, main = "PACF plot")
+```
+The partial autocorraltion is significant large for past 12 observations and declining to significant zero for observations lagged more than 38. It suggests that the partial autocorrelation is high with the data in last 1 year oberservation. It has less partial corrlation with data in last 2-3 years and no significant partial autocorraltion with data over 3 years.
+
+
+### (d) Fitting Linear and Nonlinear Models
+
+#### Linear Fit
+
+$$Model: y_t = \beta_0 + \beta_1 TIME$$
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+# linear
+linear_fit <- lm(ts ~ t)
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Linear Fit")
+lines(t, linear_fit$fit, col = "darkred", lwd = 2, type = "l")
+```
+
+
+#### Quadratic Fit
+
+$$Model: y_t = \beta_0 + \beta_1 TIME + \beta_2 TIME^2$$
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+quad_fit <- lm(ts ~ t + I(t^2))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Quadratic Fit")
+lines(t, quad_fit$fit, col = "darkred", lwd = 2, type = "l")
+```
+
+\newpage
+#### Log-linear Fit
+
+$$Model: log(y_t) = \beta_0 + \beta_1 TIME$$
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+log_fit <- lm(log(ts) ~ t)
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-linear Fit")
+lines(t, exp(log_fit$fit), col = "darkred", lwd = 2, type = "l")
+```
+
+
+#### Log-quadratic Fit
+
+$$Model: log(y_t) = \beta_0 + \beta_1 TIME + \beta_2 TIME^2$$
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+logQuad_fit <- lm(log(ts) ~ t + I(t^2))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-quadratic Fit")
+lines(t, exp(logQuad_fit$fit), col = "darkred", lwd = 2, type = "l")
+```
+
+\newpage
+#### Exponential Fit
+
+$$Model: y_t = e^{(\beta_0 + \beta_1 TIME)}$$
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+exp_fit <- minpack.lm::nlsLM(ts ~ exp(a + b * t), start = list(a = 0, b = 0))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Exponential Fit")
+lines(t, predict(exp_fit, list(x = t)), col = "darkred", lwd = 2)
+```
+
+
+#### Log-periodic fit
+
+$$Model: log(y_t) = \beta_0 + \beta_1 TIME + \beta_3 sin(2\pi TIME) + \beta_4 cos(2\pi TIME)$$
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+sint <- sin(2 * pi * t)
+cost <- cos(2 * pi * t)
+logPeriod_fit <- lm(log(ts) ~ t + sint + cost)
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-periodic fit")
+lines(t, exp(logPeriod_fit$fit), col = "darkred", lwd = 2, type = "l")
+```
+
+\newpage
+#### Log-quadratic-periodic Fit
+
+$$Model: log(y_t) = \beta_0 + \beta_1 TIME + \beta_1 TIME^2 + \beta_4 sin(2\pi TIME) + \beta_5 cos(2\pi TIME)$$
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+logQuadPeriod_fit <- lm(log(ts) ~ t + I(t^2) + I(sin(2 * pi * t)) + I(cos(2 * pi * t)))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-quadratic-periodic Fit")
+lines(t, exp(logQuadPeriod_fit$fit), col = "darkred", lwd = 2, type = "l")
+```
+
+
+### (e) Residuals vs. Fitted Values
+
+```{r echo=FALSE}
+par(mfcol = c(2, 2), mar = c (1, 2, 2, 2), oma = c(2, 2, 1.5, 2))
+
+plot(t, linear_fit$fit, ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "linear Fit")
+plot(t, linear_fit$residuals, ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, quad_fit$fit, ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "Quadratic Fit")
+plot(t, quad_fit$residuals, ylab="Residuals", ,xlab="Time", type='l')
+
+
+plot(t, exp(log_fit$fit), ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "Log-linear Fit")
+plot(t, exp(log_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, exp(logQuad_fit$fit), ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "Log-quadratic Fit")
+plot(t, exp(logQuad_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, predict(exp_fit, list(x = t)), lwd = 2, ylab = "Alcohol Sales", xlab = "Time", 
+     type = "l", main = "Exponential Fit")
+plot(t, residuals(exp_fit), ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, exp(logPeriod_fit$fit), ylab = "alcohol Sales", xlab = "Time", type = "l", main = "Log-periodic Fit")
+plot(t, exp(logPeriod_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+```
+```{r echo=FALSE, fig.height=4, fig.width=7.5}
+par(mfcol = c(2,1), mar = c (1, 2, 2, 2), oma = c(2, 2, 1.5, 2))
+plot(t, exp(logQuadPeriod_fit$fit), ylab = "alcohol Sales", xlab = "Time", type = "l", main = "Log-quadratic-periodic Fit")
+plot(t, exp(logQuadPeriod_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+```
+The residual of linear, quadratic and exponential fit have non-constant mean and increasing variance as years approach 2020. Compared with above models, log-linear, log-quadratic and log-period fit make the spread of residual more even with time but still have fluctuating mean around zero. These models not good enougth tp fit the trend. The log-quadratic-period fit has a almost constant mean around zero and a even spread. It is perfect to measure the trend in our time series.
+
+
+### (f) Histograms of Residuals
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+par(mfrow = c(2,2), mar = c (3, 2, 2, 2))
+hist(linear_fit$resid, main = "Residuals of Linear Fit")
+hist(quad_fit$resid, main = "Residuals of Quadratic Fit")
+hist(exp(log_fit$resid), main = "Residuals of Log-linear Fit")
+hist(exp(logQuad_fit$resid), main = "Residuals of Log-quadratic Fit")
+hist(residuals(exp_fit), main = "Residuals of Exponential Fit")
+hist(exp(logPeriod_fit$resid), main = "Residuals of Log-periodic Fit")
+hist(exp(logQuadPeriod_fit$resid), main = "Residuals of Log-quadratic-periodic Fit")
+```
+The histograms of residuals suggest the same conclusion with the residual plot that the log-quadratic-periodic model fits the trend best. Compared to distribution of residuals of other model, log-quadratic-period and log-period fits have more normal distributed residuals.
+
+\newpage
+### (g) Diagnostic Statistics
+
+```{r eval=FALSE, include=FALSE}
+stargazer(linear_fit, quad_fit, log_fit)
+stargazer(logQuad_fit, logPeriod_fit, logQuadPeriod_fit)
+```
+
+
+\begin{table}[!htbp] \centering 
+  \caption{} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lccc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{3}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-4} 
+\\[-1.8ex] & \multicolumn{2}{c}{ts} & log(ts) \\ 
+\\[-1.8ex] & Linear & Quadratic & Log-linear\\ 
+\hline \\[-1.8ex] 
+ t & 357.474$^{***}$ & $-$19,048.380$^{***}$ & 0.046$^{***}$ \\ 
+  & (6.808) & (3,521.995) & (0.001) \\ 
+  & & & \\ 
+ I(t$\hat{\mkern6mu}$2) &  & 4.836$^{***}$ &  \\ 
+  &  & (0.878) &  \\ 
+  & & & \\ 
+ Constant & $-$709,005.400$^{***}$ & 18,758,366.000$^{***}$ & $-$82.690$^{***}$ \\ 
+  & (13,659.700) & (3,533,179.000) & (1.600) \\ 
+  & & & \\ 
+\hline \\[-1.8ex] 
+Observations & 345 & 345 & 345 \\ 
+R$^{2}$ & 0.889 & 0.898 & 0.905 \\ 
+Adjusted R$^{2}$ & 0.889 & 0.898 & 0.905 \\ 
+Residual Std. Error & 1,052.546 (df = 343) & 1,010.199 (df = 342) & 0.123 (df = 343) \\ 
+F Statistic & 2,757.007$^{***}$ (df = 1; 343) & 1,511.676$^{***}$ (df = 2; 342) & 3,279.262$^{***}$ (df = 1; 343) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\end{tabular} 
+\end{table} 
+
+\begin{table}[!htbp] \centering 
+  \caption{} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lccc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{3}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-4} 
+\\[-1.8ex] & \multicolumn{3}{c}{log(ts)} \\ 
+\\[-1.8ex] & Log-quadratic & Log-periodic & Log-quadratic-periodic\\ 
+\hline \\[-1.8ex] 
+ t & 1.586$^{***}$ & 0.046$^{***}$ & 1.596$^{***}$ \\ 
+  & (0.422) & (0.001) & (0.373) \\ 
+  & & & \\ 
+ I(t$\hat{\mkern6mu}$2) & $-$0.0004$^{***}$ &  & $-$0.0004$^{***}$ \\ 
+  & (0.0001) &  & (0.0001) \\ 
+  & & & \\ 
+ sin\_t &  & $-$0.048$^{***}$ & $-$0.047$^{***}$ \\ 
+  &  & (0.008) & (0.008) \\ 
+  & & & \\ 
+ cos\_t &  & $-$0.065$^{***}$ & $-$0.065$^{***}$ \\ 
+  &  & (0.008) & (0.008) \\ 
+  & & & \\ 
+ Constant & $-$1,628.100$^{***}$ & $-$82.366$^{***}$ & $-$1,637.562$^{***}$ \\ 
+  & (423.689) & (1.421) & (374.041) \\ 
+  & & & \\ 
+\hline \\[-1.8ex] 
+Observations & 345 & 345 & 345 \\ 
+R$^{2}$ & 0.909 & 0.926 & 0.929 \\ 
+Adjusted R$^{2}$ & 0.908 & 0.925 & 0.929 \\ 
+Residual Std. Error & 0.121 (df = 342) & 0.109 (df = 341) & 0.107 (df = 340) \\ 
+F Statistic & 1,705.102$^{***}$ (df = 2; 342) & 1,418.403$^{***}$ (df = 3; 341) & 1,118.936$^{***}$ (df = 4; 340) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{3}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table} 
+
+For all above linear fits, the estimates of coefficients are statistical significant at 99% level of confidence. As for linear fits without periodic terms, the log-quadratic model performs good than other model because of larger adjusted $R^2$. From the aspect of economic meaning of the model, we know that taking log on alcohol sales would make the regression more stationary. And there exist quadratic relationship that the sales of alcohol increases at an decreasing rate with years.
+
+After adding the periodic terms into log-quadratic model, $R^2$ fo the models get larger so that we can fit and predict better. 
+
+Let look at the performance of non-linear model.
+
+```{r echo=FALSE}
+summary(exp_fit)
+```
+The estimates of coefficients are statistical significant but the RSE is large. Therefore, exponential model not fit the trend well.
+
+We can also look at the MSE of the models.
+```{r echo=FALSE}
+models = list(linear_fit = linear_fit, quad_fit = quad_fit, log_fit=log_fit, logQuad_fit = logQuad_fit,
+              exp_fit = exp_fit, logPeriod_fit = logPeriod_fit, logQuadPeriod_fit = logQuadPeriod_fit)
+
+data.frame(MSE = sapply(models, function(x) sum(residuals(x)^2) / (345 - length(x$coeff))))
+```
+The result agrees with our analysis above. The log-quadratic-period moel has the smallest MSE.
+
+ 
+### (h) Trend Model Selection
+
+```{r echo=FALSE}
+t(sapply(models, function(x) c(AIC = AIC(x), BIC = BIC(x))))
+```
+Both AIC and BIC select the log-quadratic-period model as the best-fitted model of the trend.
+
+
+### (i) Forecast
+
+We can forecast 24-steps ahead.
+```{r echo=FALSE}
+# set up newdata to forecast 24 step ahead
+tn <- data.frame(t = seq(2020.8, 2022.75, length = 24))
+
+f1 <- forecast(logQuadPeriod_fit, newdata = tn, h = 24, level = 0.95) #log(ts)
+
+# remeber to take exp() of the results for model use log(y)
+ts_predicted <- exp(f1$mean) 
+pi_h <- exp(f1$upper)
+pi_l <- exp(f1$lower)
+forecast_df <- data.frame(cbind(t = tn$t, ts_predicted, pi_h, pi_l))
+forecast_df[, -1]
+```
+
+Intuitively, the plot of predicted values and respective prediction interval is shown below.
+
+```{r echo=FALSE, fig.height=3, fig.width=7}
+ggplot(forecast_df, aes(x = t)) + # time for prediction
+         geom_ribbon(aes(ymin = pi_l, ymax = pi_h), alpha = 0.3) +  # prediction intervals
+         geom_line(aes(y = ts_predicted)) # predicted values
+```
+
+
+\newpage
+## 2.2 Modeling and Forcasting Seasonality
+
+### (a) Seasonality Test
+
+
+```{r include=FALSE}
+season <- factor(months(df[,'date'], abbreviate = TRUE), month.abb)
+season_mod <- lm(ts ~ season)
+stargazer(season_mod)
+```
+\begin{table}[!htbp] \centering 
+  \caption{} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{1}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-2} 
+\\[-1.8ex] & ts \\ 
+\hline \\[-1.8ex] 
+ seasonFeb & 523.483 \\ 
+  & (808.273) \\ 
+ seasonMar & 1,741.931$^{**}$ \\ 
+  & (808.273) \\ 
+ seasonApr & 1,688.966$^{**}$ \\ 
+  & (808.273) \\ 
+ seasonMay & 2,529.897$^{***}$ \\ 
+  & (808.273) \\ 
+ seasonJun & 2,939.828$^{***}$ \\ 
+  & (808.273) \\ 
+ seasonJul & 2,086.448$^{**}$ \\ 
+  & (808.273) \\ 
+ seasonAug & 2,532.483$^{***}$ \\ 
+  & (808.273) \\ 
+seasonSep & 2,003.000$^{**}$ \\ 
+  & (808.273) \\ 
+ seasonOct & 2,210.389$^{***}$ \\ 
+  & (815.457) \\ 
+ seasonNov & 2,218.353$^{***}$ \\ 
+  & (815.457) \\ 
+ seasonDec & 3,353.175$^{***}$ \\ 
+  & (815.457) \\ 
+ Constant & 6,240.897$^{***}$ \\ 
+  & (571.535) \\ 
+\hline \\[-1.8ex] 
+Observations & 345 \\ 
+R$^{2}$ & 0.081 \\ 
+Adjusted R$^{2}$ & 0.051 \\ 
+Residual Std. Error & 3,077.810 (df = 333) \\ 
+F Statistic & 2.686$^{***}$ (df = 11; 333) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{1}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table}
+
+Except for February, the seasonality is statistically significant, indicating our model has seasonality.
+
+\newpage
+### (b) Seasonal Factors
+
+```{r echo=FALSE, fig.height=3, fig.width=7}
+plot(season_mod$coefficients, type = "l", main = "Seasonal Factors")
+```
+The seasonal factors suggest that alcohol sell bad in February then raise to two peak in June and August. It might because people prefer to drink in hot summer instead of cold winter time. And alcohol sales are also good in December because people would like to drink on Christmas and New year.
+
+
+
+### (c) Model with Trend and Seasonality
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+mod <- lm(log(ts) ~ t + I(t^2) + I(sin(2 * pi * t)) + I(cos(2 * pi * t)) + season)
+
+par(mfrow = c(2,1), mar = c (1, 2, 2, 2), oma = c(2, 2, 1.5, 2))
+plot(exp(mod$fitted.values), xlab = "Time", ylab = "log(Alcohol Sales)", 
+     main = "Model with Trend and Seasonality", type = "l")
+plot(exp(mod$residuals), xlab = "Time", type = "l")
+```
+
+The residuals of full model have a non-constant mean and even more volatile than the trend model in part 1, suggesting that there are other dynamic in the times series we do not capture.
+
+\newpage
+### (d) Results of Full Model
+
+```{r include=FALSE}
+stargazer(mod)
+mse <- sum(mod$residuals^2)/(345-length(mod$coefficients))
+```
+
+\begin{table}[!htbp] \centering 
+  \caption{} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{1}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-2} 
+\\[-1.8ex] & log(ts) \\ 
+\hline \\[-1.8ex] 
+ t & 1.490$^{***}$ \\ 
+  & (0.177) \\ 
+ I(t$\hat{\mkern6mu}$2) & $-$0.0004$^{***}$ \\ 
+  & (0.00004) \\ 
+ I(sin(2 \textasteriskcentered  pi \textasteriskcentered  t)) & 0.010 \\ 
+  & (0.026) \\ 
+ I(cos(2 \textasteriskcentered  pi \textasteriskcentered  t)) & 0.019 \\ 
+  & (0.026) \\ 
+ seasonFeb & 0.073$^{***}$ \\ 
+  & (0.019) \\ 
+ seasonMar & 0.244$^{***}$ \\ 
+  & (0.029) \\ 
+ seasonApr & 0.248$^{***}$ \\ 
+  & (0.038) \\ 
+ seasonMay & 0.349$^{***}$ \\ 
+  & (0.046) \\ 
+ seasonJun & 0.397$^{***}$ \\ 
+  & (0.051) \\ 
+ seasonJul & 0.309$^{***}$ \\ 
+  & (0.053) \\ 
+ seasonAug & 0.354$^{***}$ \\ 
+  & (0.051) \\ 
+ seasonSep & 0.279$^{***}$ \\ 
+  & (0.046) \\ 
+ seasonOct & 0.317$^{***}$ \\ 
+  & (0.038) \\ 
+ seasonNov & 0.306$^{***}$ \\ 
+  & (0.029) \\ 
+ seasonDec & 0.414$^{***}$ \\ 
+  & (0.019) \\ 
+ Constant & $-$1,532.073$^{***}$ \\ 
+  & (177.764) \\ 
+\hline \\[-1.8ex] 
+Observations & 345 \\ 
+R$^{2}$ & 0.985 \\ 
+Adjusted R$^{2}$ & 0.984 \\ 
+Residual Std. Error & 0.051 (df = 329) \\ 
+F Statistic & 1,403.919$^{***}$ (df = 15; 329) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\end{tabular} 
+\end{table} 
+
+The regession result told us why the model performs not satisfying. It is because when we adding seasonal dummies into model, the period terms are unsignificant and the estimate of quadratic term is really small. So we fail to capture the whole dynamic of trend in the data. However, the MSE equals to  0.00257452 which is small and $R^2$ equals to 0.984 which is large, indicating our model fits good.
+
+\newpage
+### (e) Forcast
+
+```{r  echo=FALSE}
+# forecast with full model
+f2 <- forecast(tslm(log(ts) ~ t + I(t^2) + I(sin(2 * pi * t)) + I(cos(2 * pi * t)) + season), 
+         newdata = tn, h = 24, level = 0.95)
+
+ts_predicted1 <- exp(f2$mean) 
+pi_h1 <- exp(f2$upper)
+pi_l1 <- exp(f2$lower)
+forecast_df1 <- data.frame(cbind(t = tn$t, ts_predicted1, pi_h1, pi_l1))
+forecast_df1[, -1]
+```
+
+Intuitively, the plot of predicted values and respective prediction interval is shown below.
+
+```{r echo=FALSE, fig.height=3, fig.width=7}
+ggplot(forecast_df1, aes(x = t)) + # time for prediction
+         geom_ribbon(aes(ymin = pi_l1, ymax = pi_h1), alpha = 0.3) +  # prediction intervals
+         geom_line(aes(y = ts_predicted1)) # predicted values
+```
+
+
+### (f) De-seasonality
+
+```{r echo=FALSE}
+plot(mod1 <- stl(ts,s.window="periodic", s.))
+```
+After decomposing the times series, we can see the seasonal fluctuation do no vary much with time, we can choose addictive adjustment to remove seasonality.
+
+
+```{r echo=FALSE, fig.height=3.5, fig.width=7}
+seasonal <- mod1$time.series[, 1]
+seasonal_Adjusted <- ts - seasonal
+
+plot(seasonal_Adjusted, main = "Alcohol Sales (Seasonal Adjusted)")
+```
+After the adjustment of seasonality, the trend is a linear model adding cycles. Obviously, the periodic terms in the former model are not appropriate because their effects are overlapped with the seasonal dummies. 
+
+
+# 3. Conclusions and Future Work
+
+Based on the full model, we find that the times series can be decomposed to a linear trend and additive seasonality and cycles. The ACF plot suggests the time series have strong autocorrelation so that we can further remove the seasonality and trend, then use AR model to fit and forecast the time series.
+
+# References
+
++ Data is from [FRED](https://fred.stlouisfed.org/series/S4248SM144NCEN)
++ Professor Rojas's Class Slides and Codes
++ [TA Onyambu's Code](https://colab.research.google.com/drive/1zRwc1woyNA1nqFug0b0B4SaOjfJ3GVGf?usp=sharing#scrollTo=8KYPmOiH31gm)
++ [Forcast package](https://cran.r-project.org/web/packages/forecast/forecast.pdf)
++ [Debugging for the Function Forecast](https://stackoverflow.com/questions/8497203/r-cannot-predict-specific-value)
+
+
+
+# R Source Code 
+
+```{r eval=FALSE}
+# ---------------[0] PREPARATION ---------------
+# fix default of language to English
+Sys.setenv(LANGUAGE = "en")
+
+# load libraries
+library(tseries)
+library(stargazer)
+library(forecast)
+
+# set working document
+setwd('C:/Users/Gefei Zhao/Desktop/UCLA/430/Homework/Homework 3-20201117')
+
+# import training data
+df <- read.table("S4248SM144NCEN.csv", sep = ",", head = T)
+
+# rename the variable
+names(df) <- c("date", "alcohol")
+
+
+# ---------------[1] SUMMARY OF TIME SERIES ---------------
+# summary statistics
+stargazer(df)
+
+# convert data to time series formate
+ts <- ts(df$alcohol, start = c(1992, 1), frequency = 12)
+t <- seq(1992, 2020.75, length = length(ts))
+alco_df <- cbind.data.frame(t, ts)
+
+plot(ts, xlab = "Time", ylab = "Monthly Alcohol Sales")
+tis::nberShade() # add recession bands
+lines(ts)  
+
+
+# ACF
+acf(df$alcohol, lag = 60, main = "ACF plot")
+## Notice: Do not use the data of time series format to do the ACF and PACF plot,
+## the x axis which is lag operater would be non-integer
+
+# PACF
+pacf(df$alcohol, lag = 60, main = "PACF plot")
+
+
+# ---------------[2] BUILT MODELS TO FIT TREND ---------------
+# linear
+linear_fit <- lm(ts ~ t)
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Linear Fit")
+lines(t, linear_fit$fit, col = "darkred", lwd = 2, type = "l")
+
+# quadratic
+quad_fit <- lm(ts ~ t + I(t^2))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Quadratic Fit")
+lines(t, quad_fit$fit, col = "darkred", lwd = 2, type = "l")
+
+# log-linear
+log_fit <- lm(log(ts) ~ t)
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-linear Fit")
+lines(t, exp(log_fit$fit), col = "darkred", lwd = 2, type = "l")
+
+# log-quadratic
+logQuad_fit <- lm(log(ts) ~ t + I(t^2))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-quadratic Fit")
+lines(t, exp(logQuad_fit$fit), col = "darkred", lwd = 2, type = "l")
+
+# exponential 
+exp_fit <- minpack.lm::nlsLM(ts ~ exp(a + b * t), start = list(a = 0, b = 0))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Exponential Fit")
+lines(t, predict(exp_fit, list(x = t)), col = "darkred", lwd = 2)
+
+# log-periodic
+sint <- sin(2 * pi * t)
+cost <- cos(2 * pi * t)
+logPeriod_fit <- lm(log(ts) ~ t + sint + cost)
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-periodic fit")
+lines(t, exp(logPeriod_fit$fit), col = "darkred", lwd = 2, type = "l")
+
+# log-quadratic-periodic
+logQuadPeriod_fit <- lm(log(ts) ~ t + I(t^2) + I(sin(2 * pi * t)) + I(cos(2 * pi * t)))
+
+plot(ts, ylab = "Alcohol Sales", xlab = "Time", lwd = 2,
+     col = "dodgerblue4", xlim = c(1992, 2020), main = "Log-quadratic-periodic Fit")
+lines(t, exp(logQuadPeriod_fit$fit), col = "darkred", lwd = 2, type = "l")
+
+
+# ---------------[3] ANALYSIS OF THE RESULTS OF MODELS---------------
+# residual plots vs. fitted values
+par(mfcol = c(2, 2), mar = c (1, 2, 2, 2), oma = c(2, 2, 1.5, 2))
+
+plot(t, linear_fit$fit, ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "linear Fit")
+plot(t, linear_fit$residuals, ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, quad_fit$fit, ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "Quadratic Fit")
+plot(t, quad_fit$residuals, ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, exp(log_fit$fit), ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "Log-linear Fit")
+plot(t, exp(log_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, exp(logQuad_fit$fit), ylab = "Alcohol Sales", xlab = "Time", type = "l", main = "Log-quadratic Fit")
+plot(t, exp(logQuad_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, predict(exp_fit, list(x = t)), lwd = 2, ylab = "Alcohol Sales", xlab = "Time", 
+     type = "l", main = "Exponential Fit")
+plot(t, residuals(exp_fit), ylab="Residuals", ,xlab="Time", type='l')
+
+plot(t, exp(logPeriod_fit$fit), ylab = "alcohol Sales", xlab = "Time", type = "l", main = "Log-periodic Fit")
+plot(t, exp(logPeriod_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+
+par(mfcol = c(2,1), mar = c (1, 2, 2, 2), oma = c(2, 2, 1.5, 2))
+plot(t, exp(logQuadPeriod_fit$fit), ylab = "alcohol Sales", xlab = "Time", type = "l", main = "Log-quadratic-periodic Fit")
+plot(t, exp(logQuadPeriod_fit$residuals), ylab="Residuals", ,xlab="Time", type='l')
+
+
+# histograms of residuals for each model
+par(mfrow = c(2,2), mar = c (3, 2, 2, 2))
+hist(linear_fit$resid, main = "Residuals of Linear Fit")
+hist(quad_fit$resid, main = "Residuals of Quadratic Fit")
+hist(exp(log_fit$resid), main = "Residuals of Log-linear Fit")
+hist(exp(logQuad_fit$resid), main = "Residuals of Log-quadratic Fit")
+hist(residuals(exp_fit), main = "Residuals of Exponential Fit")
+hist(exp(logPeriod_fit$resid), main = "Residuals of Log-periodic Fit")
+hist(exp(logQuadPeriod_fit$resid), main = "Residuals of Log-quadratic-periodic Fit")
+
+# results of model 
+stargazer(linear_fit, quad_fit, log_fit)
+stargazer(logQuad_fit, logPeriod_fit, logQuadPeriod_fit)
+summary(exp_fit)
+
+# MSE
+models = list(linear_fit = linear_fit, quad_fit = quad_fit, log_fit=log_fit, logQuad_fit = logQuad_fit,
+              exp_fit = exp_fit, logPeriod_fit = logPeriod_fit, logQuadPeriod_fit = logQuadPeriod_fit)
+
+data.frame(MSE = sapply(models, function(x) sum(residuals(x)^2) / (345 - length(x$coeff))))
+
+
+
+# ---------------[4] MODEL SELECTION ---------------
+# AIC & BIC
+t(sapply(models, function(x) c(AIC = AIC(x), BIC = BIC(x))))
+
+
+# ---------------[5] FORECAST WITH TREND MODEL ---------------
+# set up newdata to forecast 24 step ahead
+tn <- data.frame(t = seq(2020.8, 2022.75, length = 24))
+
+f1 <- forecast(logQuadPeriod_fit, newdata = tn, h = 24, level = 0.95) #log(ts)
+
+# remeber to take exp() of the results for model use log(y)
+ts_predicted <- exp(f1$mean) 
+pi_h <- exp(f1$upper)
+pi_l <- exp(f1$lower)
+forecast_df <- data.frame(cbind(t = tn$t, ts_predicted, pi_h, pi_l))
+forecast_df[, -1]
+
+# plot the forecast value and prediction interval
+ggplot(forecast_df, aes(x = t)) + # time for prediction
+         geom_ribbon(aes(ymin = pi_l, ymax = pi_h), alpha = 0.3) +  # prediction intervals
+         geom_line(aes(y = ts_predicted)) # predicted values
+
+
+
+# ---------------[6] TEST AND CONSTRUCT SEASONALITY ---------------
+
+# test for seasonality
+season <- factor(months(df[,'date'], abbreviate = TRUE), month.abb)
+stargazer(season_mod <- lm(ts ~ season))
+
+
+# plot the seasonal factors
+plot(season_mod$coefficients, type = "l", main = "Seasonal Factors")
+
+
+# ---------------[7] FORECAST WITH FULL MODEL ---------------
+mod <- lm(log(ts) ~ t + I(t^2) + I(sin(2 * pi * t)) + I(cos(2 * pi * t)) + season)
+
+par(mfrow = c(2,1), mar = c (1, 2, 2, 2), oma = c(2, 2, 1.5, 2))
+plot(exp(mod$fitted.values), xlab = "Time", ylab = "log(Alcohol Sales)", 
+     main = "Model with Trend and Seasonality", type = "l")
+plot(exp(mod$residuals), xlab = "Time", type = "l")
+
+stargazer(mod)
+mse <- sum(mod$residuals^2)/(345-length(mod$coefficients))
+
+# ---------------[8] MODEL WITH TREND AND SEASONALITY ---------------
+# forecast with full model ahead of 24 steps
+f2 <- forecast(tslm(log(ts) ~ t + I(t^2) + I(sin(2 * pi * t)) + I(cos(2 * pi * t)) + season), 
+         newdata = tn, h = 24, level = 0.95)
+
+ts_predicted1 <- exp(f2$mean) 
+pi_h1 <- exp(f2$upper)
+pi_l1 <- exp(f2$lower)
+forecast_df1 <- data.frame(cbind(t = tn$t, ts_predicted1, pi_h1, pi_l1))
+forecast_df1[, -1]
+
+ggplot(forecast_df1, aes(x = t)) + # time for prediction
+         geom_ribbon(aes(ymin = pi_l1, ymax = pi_h1), alpha = 0.3) +  # prediction intervals
+         geom_line(aes(y = ts_predicted1)) # predicted values
+
+
+# ---------------[9] REMOVE SEASONALITY ---------------
+# decompose the model
+plot(mod1 <- stl(log(ts),s.window="periodic"))
+
+
+# remove seasonality
+seasonal <- mod1$time.series[, 1]
+seasonal_Adjusted <- ts - seasonal
+
+plot(seasonal_Adjusted, main = "Alcohol Sales (Seasonal Adjusted)")
+```

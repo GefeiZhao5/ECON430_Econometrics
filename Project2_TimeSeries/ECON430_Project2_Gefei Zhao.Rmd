@@ -1,0 +1,1033 @@
+---
+title: "ECON 430 Project 2"
+author: "Gefei Zhao"
+date: "12/4/2020"
+output: 
+  pdf_document: 
+    toc: yes
+    toc_depth: 3
+---
+\newpage
+# 1. Introduction
+
+I select data of [retail sales](https://fred.stlouisfed.org/series/RETAILSMNSA) and [retail inventories](https://fred.stlouisfed.org/series/RETAILIMNSA) of the United State from January 1992 to September 2020 from FRED. 
+
+The retail sales and inventories data are both time-series with trend, seasonality and cycles and I suspect the retail sales would have a influence on the inventories in next period. Therefore, we can build respective ARIMA model and VAR model to forecast the sales and inventories of retailing in the United State.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# clear all variables and prior sessions
+rm(list=ls(all=TRUE))
+
+# load libraries
+library(forecast)
+library(timeSeries)
+library(ggplot2)
+library(tseries)
+library(vars)
+library(MTS)
+
+# import data
+setwd("C:/Users/Gefei Zhao/Desktop/UCLA/430/Project/2")
+df_sales <- read.csv("RETAILSMNSA.csv")
+df_inventories <- read.csv("RETAILIMNSA.csv")
+
+# rename the variables in datasets
+names(df_sales) <- c("date", "sales")
+names(df_inventories) <- c("date", "inventories")
+```
+
+
+# 2. Results
+
+## 2.1 Time-series Plots
+
+First of all, we can look at the time-series plots of the data.   
+```{r echo=FALSE, fig.height=5, fig.width=7}
+# convert data into time-series format
+sales <- ts(df_sales$sales, start = 1992, frequency = 12)
+inventories <- ts(df_inventories$inventories, start = 1992, frequency = 12)
+
+# plot time-series plots, ACF and PACF plots
+tsdisplay(sales)
+tsdisplay(inventories)
+```
+
+The two time-series data have obvious trend, seasonality and cycles. Specifically, both sales and retail have a sharp decline in recession in 2009 and 2020. Besides, the patterns of sales and inventories looks identical but invent is lagging to some degree. 
+
+As for the ACF plots, both time series shows high persistence that the ACF decay slowly. In PACF plots, there are few spikes in low-level lags so that we can suspect they are more likely to be estimated by Autoregressive models.
+
+
+## 2.2 Baseline ARIMA Model
+
+As a baseline model, we can use the auto.arima function to fit models for sales and inventories. From the times-series plots in part 1, we can observe a increasing variance in each data. So I take log to both data to stabilize the variance then build the models.
+
+```{r echo=FALSE}
+# use the function to determine order automatically
+fit1 <- auto.arima(log(sales))
+fit2 <- auto.arima(log(inventories))
+
+summary(fit1)
+summary(fit2)
+```
+The function suggests a ARIMA(2,1,2) with a monthly seasonal ARIMA(0,1,2) for log(sales) and a ARIMA(2,1,1) with a monthly seasonal ARIMA(1,1,2) for log(inventories). The sigma squares, log likelihood and the error metrics look good for both models. 
+
+Next, we can further look at the fitted values and residuals for respective model to thoroughly comment on the performances of models.
+
+```{r  echo=FALSE, fig.height=4, fig.width=7}
+# fitted values vs. real data
+
+plot(log(sales), main ="Log(sales) vs. auto.arima model Fitted Values")
+lines(fitted(fit1), lty = 2, col = "red")
+
+plot(log(inventories), main ="Log(inventories) vs. auto.arima model Fitted Values")
+lines(fitted(fit2), lty = 2, col = "red")
+
+# check the residuals of fits
+checkresiduals(fit1)
+checkresiduals(fit2)
+```
+The curves seem to fit good according to the plots of real data vs. fitted values. However, when we look at the residuals, there are some spikes in ACF plots and the distribution of residuals are not normal, along with the Ljung-Box test reject null, indicating there are still some dynamic left and not capture by the arima models. 
+
+
+## 2.3 Model Including Trend, Seasonality and Cycle
+
+To build our ARIMA model, we can firstly look at the decomposition of the time-series and get a brief overview of the components of model.
+
+Log(sales) and Log(inventories) both have a linear or quadratic trend and a downturn in 2009. As for seasonality, the data before log have increasing seasonal fluctuations with time which is multiplicative seasonality. Since we take log for the data and stablize the variance, $log(y_t)=log(S_t *T_t*R_t)=log(S_t)+log(T_t)+log(R_t)$. We can remove seasonality by simply substract the fitted value of seasonality.
+
+```{r echo=FALSE, fig.height=5, fig.width=7}
+# take log to stablize variance
+lsales <- log(sales)
+linvent <- log(inventories)
+
+# use stl to decompose
+lsales %>%
+  stl(t.window=13, s.window="periodic", robust=TRUE) %>%
+  plot(, main = 'stl of log(sales)')
+
+linvent %>%
+  stl(t.window=13, s.window="periodic", robust=TRUE) %>%
+  plot(, main = 'stl of log(inventories)')
+```
+
+
+\newpage
+### 2.3.1 Trend Fitting
+```{r  echo=FALSE}
+# --------- (a) TREND ---------
+t <- seq(1992, 2020.75, length = length(sales))
+t2 <- t^2
+
+# sales
+logLin_sales <- lm(lsales ~ t)
+logQuad_sales <- lm(lsales ~ t + t2)
+
+models_sales <- list(logLinear = logLin_sales, logQuad = logQuad_sales)
+summ_sales <- data.frame(sapply(models_sales, function(x) c(AIC(x), BIC(x))))
+row.names(summ_sales) <- c("AIC", "BIC")
+
+# inventories
+logLin_invent <- lm(linvent ~ t)
+logQuad_invent <- lm(linvent ~ t + t2)
+
+models_invent <- list(logLinear = logLin_invent, logQuad = logQuad_invent)
+summ_invent <- data.frame(sapply(models_invent, function(x) c(AIC(x), BIC(x))))
+row.names(summ_invent) <- c("AIC", "BIC")
+
+# stargazer::stargazer(logLin_sales, logQuad_sales)
+# stargazer::stargazer(logLin_invent, logQuad_invent)
+```
+\begin{table}[!htbp] \centering 
+  \caption{} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lcc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{2}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-3} 
+\\[-1.8ex] & \multicolumn{2}{c}{lsales} \\ 
+\\[-1.8ex] & (1) & (2)\\ 
+\hline \\[-1.8ex] 
+ t & 0.037$^{***}$ & 3.035$^{***}$ \\ 
+  & (0.001) & (0.291) \\ 
+  & & \\ 
+ t2 &  & $-$0.001$^{***}$ \\ 
+  &  & (0.0001) \\ 
+  & & \\ 
+ Constant & $-$62.159$^{***}$ & $-$3,069.245$^{***}$ \\ 
+  & (1.238) & (291.937) \\ 
+  & & \\ 
+\hline \\[-1.8ex] 
+Observations & 345 & 345 \\ 
+R$^{2}$ & 0.914 & 0.934 \\ 
+Adjusted R$^{2}$ & 0.914 & 0.934 \\ 
+Residual Std. Error & 0.095 (df = 343) & 0.083 (df = 342) \\ 
+F Statistic & 3,642.553$^{***}$ (df = 1; 343) & 2,432.396$^{***}$ (df = 2; 342) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{2}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table} 
+
+\begin{table}[!htbp] \centering 
+  \caption{} 
+  \label{} 
+\begin{tabular}{@{\extracolsep{5pt}}lcc} 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{2}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-3} 
+\\[-1.8ex] & \multicolumn{2}{c}{linvent} \\ 
+\\[-1.8ex] & (1) & (2)\\ 
+\hline \\[-1.8ex] 
+ t & 0.030$^{***}$ & 1.979$^{***}$ \\ 
+  & (0.0005) & (0.231) \\ 
+  & & \\ 
+ t2 &  & $-$0.0005$^{***}$ \\ 
+  &  & (0.0001) \\ 
+  & & \\ 
+ Constant & $-$47.579$^{***}$ & $-$2,002.389$^{***}$ \\ 
+  & (0.945) & (231.968) \\ 
+  & & \\ 
+\hline \\[-1.8ex] 
+Observations & 345 & 345 \\ 
+R$^{2}$ & 0.923 & 0.936 \\ 
+Adjusted R$^{2}$ & 0.923 & 0.936 \\ 
+Residual Std. Error & 0.073 (df = 343) & 0.066 (df = 342) \\ 
+F Statistic & 4,112.388$^{***}$ (df = 1; 343) & 2,511.434$^{***}$ (df = 2; 342) \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{2}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table} 
+
+
+The estimate of coefficients are all statistically significant and the $R^2$ are higher in log-quadratic model for sales and inventories. 
+
+```{r  echo=FALSE}
+summ_sales
+summ_invent
+```
+AIC and BIC agrees wit choosing the Log-Quadratic model for both sales and inventories.
+
+
+### 2.3.2 Seasonality Fitting
+
+We can test for the seasonality using tslm function.
+```{r echo=FALSE, fig.height=3, fig.width=7}
+## fit seasonal lm model for sales
+season_sales <- tslm(lsales ~ season + 0)
+summary(season_sales)
+plot(season_sales$coefficients, type = "l", main = "seasonal Factors for Retail Sales", 
+     xlab = "Month", ylab = "Seasonal Factor")
+```
+There are seasonality in the time series of sales because estimates of parameters are statistically significant. The coefficients suggest that retail sales peak at December since people love to consume in the holidays. And the retail stores sell worst in January and Feburary because people prefer to consume less and save money after shopping in December.
+
+```{r echo=FALSE, fig.height=3, fig.width=7}
+## fit seasonal lm model for inventories
+season_invent <- tslm(linvent ~ season + 0)
+summary(season_invent)
+plot(season_invent$coefficients, type = "l", main = "Seasonal Factors for Retail Inventories", 
+     xlab = "Month", ylab = "Seasonal Factor")
+```
+The estimates of parameters are statistically significant as well so there do exist seasonality for retail inventories. Compared to the seasonal factor of sales, the inventories peak at November because they need to prepare as much as possible to satisfy the larger consumption in the coming December.
+
+To find the fitted ARMA model for seasonality of the time series, we can look at the ACF and PACF plots of residuals of the trend model.
+
+```{r  echo=FALSE}
+# check the ACF and PACF of the residual of trend models
+par(mfrow = c(2,2))
+Acf(logQuad_sales$resid, lag = 60)
+Pacf(logQuad_sales$resid, lag = 60)
+
+Acf(logQuad_invent$resid, lag = 60)
+Pacf(logQuad_invent$resid, lag = 60)
+```
+Log(sales) is typical S-AR(2) model, because spikes at 12, 24, 36,... and decay to zero in ACF plot and there are 2 spike at 12 and cut-off at 24. 
+
+However there are other spikes at non-seasonl lag, log(Inventories) looks like kind of S-AR(2), for the decay spikes at 12, 24,... and spikes ar 12, 24. 
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+# fit s-arma model for sales
+season_sales1 <- arima(logQuad_sales$resid, seasonal = list(order = c(2, 0, 0)))
+summary(season_sales1)
+ts.plot(logQuad_sales$resid, fitted(season_sales1), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values of Seasonality of Sales vs. Residual of Trend Model")
+
+# fit s-arma model for inventories
+season_invent1 <- arima(logQuad_invent$resid, seasonal = list(order = c(2, 0, 0)))
+summary(season_invent1)
+ts.plot(logQuad_invent$resid, fitted(season_invent1), gpars = list(col = c("darkblue", "darkred")), 
+        main = "Fitted values of Seasonality of Inventories vs. Residual of Trend Model")
+```
+We can see the models fit well from the plots of fitted values and residual of trend model. Then we can combine the trend and seasonality model together.
+
+
+```{r echo=FALSE，message=FALSE, fig.height=3.5, fig.width=7, warning=FALSE}
+# TREND + SEASONALITY
+sT_sales1 <- arima(lsales, xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+sT_invent1 <- arima(linvent, xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+
+ts.plot(lsales, fitted(sT_sales1), gpars = list(col = c("darkblue", "darkred")), ylab = "Log(sales)", 
+        main = "fitted values for trend + seasonality model vs. log(sales)")
+ts.plot(linvent, fitted(sT_invent1), gpars = list(col = c("darkblue", "darkred")), 
+        ylab = "log(inventories", 
+        main = "fitted values for trend + seasonality model vs. log(inventories)")
+```
+The distinction between the real data and the fitted value is the cycles of the time series. We can further use the residual of trend + seasonality model to explore the fitting of cycles.
+
+
+### 2.3.3 Cycles Fitting
+
+On the very begining of the fitting of cycles, we should ensure the data are stationary.
+
+```{r  echo=FALSE}
+# check stationary
+adf.test(sT_sales1$resid, k = 36)
+adf.test(sT_invent1$resid, k = 36)
+```
+The p-values are large so that we fail to reject the null hypothesis of stationary.
+
+Next, we can look at the ACF and PACF plots of residuals of the seasonality and trend model to determine the order of model of cycles.
+
+```{r  echo=FALSE}
+# ACF and PACF plots of residuals of T+S model
+par(mfrow = c(2,2))
+Acf(sT_sales1$resid, lag = 60)
+Pacf(sT_sales1$resid, lag = 60)
+
+Acf(sT_invent1$resid, lag = 60)
+Pacf(sT_invent1$resid, lag = 60)
+```
+The ACF plots are typical pattern of AR process. Then we can look at the PACF plots to do order determination. Sales is an AR(3) model and inventories are an AR(2) model.
+
+```{r  echo=FALSE}
+# CYCLE
+cycle_sales <- arima(sT_sales1$resid, order = c(3, 0, 0))
+cycle_invent <- arima(sT_invent1$resid, order = c(2, 0, 0))
+
+summary(cycle_sales)
+summary(cycle_invent)
+```
+The sigma squares and error metrics are quite small, indicating the models fits good with the real data. We can also see this from the fitted value plots.
+
+```{r  echo=FALSE, fig.height=4, fig.width=7}
+ts.plot(sT_sales1$resid, fitted(cycle_sales), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values of cycles of sales vs residuals of T+S model")
+ts.plot(sT_invent1$resid, fitted(cycle_invent), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values of cycles of inventories vs residuals of T+S model")
+```
+
+
+### 2.3.4 Full Model
+At last, we combine the above three model into the full model.
+```{r}
+# TREND + SEASONALITY + CYCLE 
+tsc_sales <- Arima(lsales, order = c(3, 0, 0), xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+tsc_invent <- Arima(linvent, order = c(2, 0, 0), xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+```
+
+
+## 2.4 Residuals vs. Fitted values
+
+```{r  echo=FALSE}
+# residuals vs fitted values
+par(mfrow = c(2, 1), mar = c(2, 4, 2, 2), oma = c(2, 2, 2, 2))
+ts.plot(lsales, fitted(tsc_sales), gpars = list(col = c("darkblue", "darkred")), 
+        main = "Fitted values of Sales Model vs. residuals")
+plot(tsc_sales$resid, ylab = "residuals") 
+
+ts.plot(linvent, fitted(tsc_invent), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values of Inventories Model vs. residuals")
+plot(tsc_invent$resid, ylab = "residuals")
+```
+The residuals are around zero and has serveral shocks in the recession in 2009 and 2020. However, the residuals are quite small. So the error of our model is small.
+
+
+## 2.5 ACF and PACF of residuals
+
+```{r  echo=FALSE}
+# ACF and PACF of residuals of full model 
+par(mfrow = c(2,2))
+Acf(tsc_sales$resid, lag = 60)
+Pacf(tsc_sales$resid, lag = 60)
+
+Acf(tsc_invent$resid, lag = 60)
+Pacf(tsc_invent$resid, lag = 60)
+```
+However, the ACF and PACF looks bad, there still some autocorrelations and partial correlations in the residual. I tried to take difference on data but R shows something goes infinite so the model cannot be estimated. Compared with the ARIMA model estimated by auto.arima function, their residuals also have some significant non-zero spikes. I infer that there are some dynamics in the variance term and we can talk about it later.
+
+
+## 2.6 CUSUM
+
+```{r  echo=FALSE, fig.height=4, fig.width=7}
+# CUSUM
+y_sales <- strucchange::recresid(tsc_sales$resid ~ 1)
+y_invent <- strucchange::recresid(tsc_invent$resid ~ 1)
+
+plot(strucchange::efp(tsc_sales$resid ~ 1, type = "Rec-CUSUM"), main = "CUSUM of Model for Sales")
+plot(strucchange::efp(tsc_invent$resid ~ 1, type = "Rec-CUSUM"), main = "CUSUM of Model for Inventories")
+```
+The CUSUM of each time-series do not cross the interval of red line, suggesting there is no structural break in each model.
+
+
+## 2.7 Recursive Residuals
+
+```{r echo=FALSE, fig.height=4.5, fig.width=7}
+# recursive residuals
+plot(y_sales, pch = 16, ylab = "Recursive Residuals", 
+     main = "Recursive Residuals of Model for Sales")
+plot(y_invent, pch = 16, ylab = "Recursive Residuals", 
+     main = "Recursive Residuals of Model for Inventories")
+```
+The recursive residuals are scattered around zero which are good.
+
+
+## 2.8 Diagnostic Statistics
+
+```{r  echo=FALSE}
+summary(tsc_sales)
+summary(tsc_invent)
+```
+For both model, the standard errors are small so that our estimates of coefficients are significant. The error metrics are quite small as well, indicating our models fits good.
+
+
+## 2.9 Forecast
+```{r echo=FALSE, fig.height=4, fig.width=7}
+tf <- seq(2020.8, 2021.75, length = 12)
+tf2 <- tf^2
+
+forecast(tsc_sales, xreg = cbind(t = tf, t2 = tf2), h = 12) %>% plot()
+forecast(tsc_invent, xreg = cbind(t = tf, t2 = tf2), h = 12) %>% plot()
+```
+
+
+## 2.10 VAR model
+
+```{r  echo=FALSE, fig.height=4, fig.width=7}
+ts.plot(sales, inventories, gpars = list(col = c("darkblue", "darkred")), 
+        main = "Retail Sales and Retail Inventories")
+legend("topleft",legend = c("Sales","Inventories"), text.col = c("darkblue", "darkred"), bty = "n")
+ccf(lsales, linvent, ylab="Cross-Correlation Function", main = "Sales and Inventories CCF")
+```
+Combining the time-series plot of both time series and the cross-correlation function, they suggest that retail sales influence retail inventories by one month.
+
+```{r echo=FALSE}
+lsi <- data.frame(cbind(lsales, linvent))
+VARselect(lsi, 20) # select var with smallest information criteria
+```
+The order determined by the four information criteria is at 16.
+
+The results of VAR model are shown below.
+```{r echo=FALSE,fig.height=5, fig.width=7}
+var_mod <- vars::VAR(lsi, p = 16)
+summary(var_mod)
+
+plot(var_mod)
+```
+From the plots, we can find that the fits are quite good. Compared with ARIMA models, there are few spikes in ACF and PACF plots, suggesting that we can do prediction more convincing.
+
+
+## 2.11 IRF
+
+```{r echo=FALSE, fig.height=4.5, fig.width=7.5}
+plot(irf(var_mod, n.ahead=36))
+```
+For the sales' shock on subsequent sales, there are seasonality shocks on the subsequent years which are decay slowly, and in each year the shock decay till next year's shock.
+
+For the sales' shock on subsequent inventories, there is no effect at first, then builts up peaking around 17-18 month.
+
+For the inventories' shock on subsequent sales, there is no effect at first but there are small seasonal shcok in the following years.
+
+For the inventories' shock on subsequent on subsequent inventories, there is a large effct at first then decay to zero after 2 years.
+
+
+## 2.12 Granger-Causality Test
+
+```{r  echo=FALSE}
+grangertest(sales ~ inventories, order = 16)
+grangertest(inventories ~ sales, order = 16)
+```
+The results of Granger-Causality test suggest that not only retail sales influences inventories but also retail inventories influences sales. The reason why the results are not as my suspection might be the sales in each year have strong seasonality so that they would adjust the inventories ahead of the sales according to the regularity to make more profits. 
+
+
+## 2.13 Forecast Using VAR
+
+```{r echo=FALSE, fig.height=6, fig.width=7}
+var_predict = predict(object = var_mod, n.ahead = 12)
+plot(var_predict)
+```
+Compared with the forecast of ARIMA model, the predictted values of sales and inventories are more correlated with each other. In ARIMA model, the predicted values are persistent with themselves. We can find that the predicted values of sales using ARIMA are higher than values using VAR and predicted values of inventories using ARIMA are lower than values using VAR. By using VAR, the two time-series looks converging to each other to some degree.
+
+
+## 2.14 Backtest ARIMA
+### (a) Recursive Backtesting Scheme of 12-steps Ahead Forecast
+To do the backtest in recursive scheme or rolling scheme, I write a function to do this and compute respective MAPE.
+
+```{r warning=FALSE}
+compute_mape <- function(data, model_order, t, h, seasonal_order, train_length, isFixed) {
+  ###############################
+  # input:
+  #
+  # data: the data we need to model
+  # model_order: chosen arima model order
+  # t: date corresponding to data
+  # h: forecast horizon
+  # seasonal_order: chosen seasonal model order
+  # train_length: length of data to train model
+  # isFixed: boolean. True: forecast according to adding new data. False: forecast according to moving      # window.
+  ################################
+  # output:
+  #
+  # MAPE data
+  #####################
+  
+  length = length(data)
+  forecast_length = length - train_length - h + 1
+  t2 <- t ^ 2
+  result <- rep(0, length = forecast_length)
+  xreg_t = cbind(t = t, t2 = t2)
+  
+  if (isFixed == TRUE) {
+    for (i in 1: forecast_length) {
+      begin_i = 1
+      end_i = train_length + i - 1
+      model <- Arima(data[begin_i: end_i], 
+                     order = model_order, 
+                     xreg = xreg_t[begin_i: end_i, ], 
+                     seasonal = list(order = seasonal_order))
+      f_begin_i = train_length + i
+      f_end_i = train_length + i + h - 1
+      prediction <- forecast(model, h = h, xreg = matrix(xreg_t[f_begin_i: f_end_i, ], ncol = 2))
+      actual <- data[f_begin_i: f_end_i]
+      result[i] <- 100 * mean(abs((actual - prediction$mean) / actual))
+    }
+  } else {
+    for (i in 1: forecast_length) {
+      begin_i = i
+      end_i = train_length + i - 1
+      model <- Arima(data[begin_i: end_i], 
+                     order = model_order, 
+                     xreg = xreg_t[begin_i: end_i, ], 
+                     seasonal = list(order = seasonal_order))
+      f_begin_i = train_length + i
+      f_end_i = train_length + i + h - 1
+      prediction <- forecast(model, h = h, xreg = matrix(xreg_t[f_begin_i: f_end_i, ], ncol = 2))
+      actual <- data[f_begin_i: f_end_i]
+      result[i] <- 100 * mean(abs((actual - prediction$mean) / actual))
+    }
+  }
+  return(result)
+}
+```
+
+So now we can use the function to do recursive backtest to forecast 12-steps each steps.
+
+```{r echo=FALSE, fig.height=4, fig.width=7, message=FALSE, warning=FALSE}
+MAPE_sales12 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 12, 
+                             seasonal_order = c(2, 0, 0),   train_length = 276, isFixed = TRUE)
+
+MAPE_invent12 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 12, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = TRUE)
+
+
+plot(MAPE_sales12, type = "l", , ylab = "MAPE(%)", ylim = c(0.25, 1),
+     main = "MAPE of Sales and Invetories Using 12-step Recursive Backtesting")
+lines(MAPE_invent12, type = "l", col = "darkblue")
+legend("topright",legend = c("Sales","Inventories"), text.col = c("black", "darkblue"), bty = "n")
+```
+
+
+### (b) Recursive Backtesting Scheme of 1-step Ahead Forecast
+
+```{r echo=FALSE, fig.height=4, fig.width=7, warning=FALSE}
+MAPE_sales1 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 1, 
+                            seasonal_order = c(2, 0, 0), train_length = 276, isFixed = TRUE)
+
+MAPE_invent1 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 1, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = TRUE)
+
+plot(MAPE_sales1, type = "l", ylab = "MAPE(%)", 
+     main = "MAPE of Sales and Invetories Using 1-step Recursive Backtesting")
+lines(MAPE_invent1, type = "l", col = "darkblue")
+legend("topleft",legend = c("Sales","Inventories"), text.col = c("black", "darkblue"), bty = "n")
+```
+
+### (c) Comparison between Short and Long Horizon
+
+```{r echo=FALSE, fig.height=4, fig.width=7, warning=FALSE}
+plot(MAPE_sales12, type = "l", ylim = c(0, 1.3), main = "Recursive Backtest of Sales",
+     ylab = "MAPE(%)")
+lines(MAPE_sales1, type = "l", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("black", "black"), 
+       lty = c(1, 2), bty = "n")
+
+plot(MAPE_invent12, type = "l", col = "darkblue", ylim = c(0,1), 
+     main = "Recursive Backtest of Inventories", ylab = "MAPE(%)")
+lines(MAPE_invent1, type = "l", col = "darkblue", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("darkblue", "darkblue"), 
+       lty = c(1, 2), bty = "n")
+```
+The MAPE of ARIMA of sales using recursive backtesting are small and not greater than 1.3%. For short horizon, MAPE has a quite large variance which have smallest value to near zero but largest to 1.3%. For longer horizon, the MAPE is stable at about 0.5%. Therefore, model of sales is good at forecasting in longer horizon.
+
+The MAPE of inventories are also small and not greater than 1%, indicating our model has great accurary in both long and short horizons. The MAPE of long term horizon have a decreasing trend meaning that larger sample sizes would lead to more precise prediction. The MAPE of short horizon is stable and small around 0.2%. Therefore, model of inventories is good ar forecasting in shorter horizon.
+
+
+### (d) Moving Window Backtesting
+
+```{r echo=FALSE, fig.height=4, fig.width=7, warning=FALSE}
+MAPE_sales_r12 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 12, 
+                             seasonal_order = c(2, 0, 0),   train_length = 276, isFixed = FALSE)
+
+MAPE_invent_r12 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 12, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = FALSE)
+
+MAPE_sales_r1 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 1, 
+                            seasonal_order = c(2, 0, 0), train_length = 276, isFixed = FALSE)
+
+MAPE_invent_r1 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 1, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = FALSE)
+
+plot(MAPE_sales_r12, type = "l", ylim = c(0, 1.3), main = "Moving Window Backtest of Sales",
+     ylab = "MAPE(%)")
+lines(MAPE_sales_r1, type = "l", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("black", "black"), 
+       lty = c(1, 2), bty = "n")
+
+plot(MAPE_invent_r12, type = "l", col = "darkblue", ylim = c(0,1), 
+     main = "Moving Window Backtest of Inventories", ylab = "MAPE(%)")
+lines(MAPE_invent_r1, type = "l", col = "darkblue", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("darkblue", "darkblue"), 
+       lty = c(1, 2), bty = "n")
+
+```
+The results are kind of same with the recursive scheme backtesting. The model of sales performs better in long horizon due to the stabilization and the model of inventories performs better in short terms because of small error all the time.
+
+
+### (e) Comparison between Recursive and Moving Window Backtesting Scheme
+
++ Sales
+
+```{r echo=FALSE, fig.height=4, fig.width=7}
+# all MAPE plots of sales
+plot(MAPE_sales1, type = "l", col = "blue4", ylab = "MAPE(%)", ylim = c(0,1.4), 
+     main = "MAPE of Recursive vs. Moving Window Backtesting of Sales", lty = 2)
+lines(MAPE_sales12, type = "l", col = "blue4")
+lines(MAPE_sales_r1, type = "l", col = "red4", lty = 2)
+lines(MAPE_sales_r12, type = "l", col = "red4")
+legend("topright",legend = c("1-step Recursive","12-steps Recursive",
+                             "1-step Moving Window","12-steps Moving Window"), 
+       text.col = c("blue4", "blue4", "red4", "red4"), lty = c(2, 1, 2, 1), bty = "n")
+
+# all MAPE plots of inventories
+plot(MAPE_invent1, type = "l", col = "blue4", ylab = "MAPE(%)", ylim = c(0,1), 
+     main = "MAPE of Recursive vs. Moving Window Backtesting of Inventories", lty = 2)
+lines(MAPE_invent12, type = "l", col = "blue4")
+lines(MAPE_invent_r1, type = "l", col = "red4", lty = 2)
+lines(MAPE_invent_r12, type = "l", col = "red4")
+legend("topright",legend = c("1-step Recursive","12-steps Recursive", "1-step Moving Window",
+                             "12-steps Moving Window"), 
+       text.col = c("blue4", "blue4", "red4", "red4"), lty = c(2, 1, 2, 1), bty = "n")
+```
+For both sales and inventories data, although the distinction is really small, the moving window backtesting has smaller errors. Our models are more precise on rolling sample means that the data points long time ago would value less for our models. 
+
+
+# 3. Conclusions and Future Work
+
+To measure and predict the retail sales and inventories data, we can build a time-series model including quadratic trend, seasonality of s-AR(2) model and cycles of AR models. And the two series influence each other so that we can also build a VAR(16) model to estimate and predict both variables simultaneously. As for the model performance, the VAR model do better than ARIMA models because there are still some dynamic left in the residuals of ARIMA models. To further improve the ARIMA models, we can try to fit a variance model such as ARCH and GARCH models to mitigate the dynamics in residuals. 
+
+As for the prediction performance, ARIMA model of sales performs better in long-horizon moving window forecasting. ARIMA model of inventories performs better in short-horizon moving window forecasting. This means our model prefer rolling samples that our models are autoregressive but relative short-memory models.
+
+
+# 4. Reference
+
++ Professor Rojas's Class Notes and Codes
++ [Data of retail sales: https://fred.stlouisfed.org/series/RETAILSMNSA](https://fred.stlouisfed.org/series/RETAILSMNSA)
++ [retail inventories: https://fred.stlouisfed.org/series/RETAILIMNSA](https://fred.stlouisfed.org/series/RETAILIMNSA)
++ [Debugging of Forecast Function: https://github.com/robjhyndman/forecast/issues/682](https://github.com/robjhyndman/forecast/issues/682)
+
+# 5. R Source Code
+```{r eval=FALSE}
+# clear all variables and prior sessions
+rm(list=ls(all=TRUE))
+
+# load libraries
+library(forecast)
+library(timeSeries)
+library(ggplot2)
+library(tseries)
+library(vars)
+library(MTS)
+
+# import data
+setwd("C:/Users/Gefei Zhao/Desktop/UCLA/430/Project/2")
+df_sales <- read.csv("RETAILSMNSA.csv")
+df_inventories <- read.csv("RETAILIMNSA.csv")
+
+# rename the variables in datasets
+names(df_sales) <- c("date", "sales")
+names(df_inventories) <- c("date", "inventories")
+
+#************ [1] TIME-SERIES PLOTS ************
+# convert data into time-series format
+sales <- ts(df_sales$sales, start = 1992, frequency = 12)
+inventories <- ts(df_inventories$inventories, start = 1992, frequency = 12)
+
+# plot time-series plots, ACF and PACF plots
+tsdisplay(sales)
+tsdisplay(inventories)
+
+#************ [2] BASILINE MODEL: AUTO ARIMA ************
+
+# use the function to determine order automatically
+fit1 <- auto.arima(log(sales))
+fit2 <- auto.arima(log(inventories))
+
+summary(fit1)
+summary(fit2)
+
+# fitted values vs. real data
+autoplot(log(sales)) + autolayer(fitted(fit1)) + 
+  ggtitle("Log(sales) vs. auto.arima model Fitted Values")
+
+autoplot(log(inventories)) + autolayer(fitted(fit2)) + 
+  ggtitle("Log(inventories) vs. auto.arima model Fitted Values")
+
+# check the residuals of fits
+checkresiduals(fit1)
+checkresiduals(fit2)
+
+#************ [3] MODEL FITTING ************
+# take log to stablize variance
+lsales <- log(sales)
+linvent <- log(inventories)
+
+# use stl to decompose
+lsales %>%
+  stl(t.window=13, s.window="periodic", robust=TRUE) %>%
+  autoplot() + ggtitle('stl of log(sales)')
+
+linvent %>%
+  stl(t.window=13, s.window="periodic", robust=TRUE) %>%
+  autoplot() + ggtitle('stl of log(inventories)')
+
+# --------- (a) TREND ---------
+t <- seq(1992, 2020.75, length = length(sales))
+t2 <- t^2
+
+# sales
+logLin_sales <- lm(lsales ~ t)
+logQuad_sales <- lm(lsales ~ t + t2)
+
+models_sales <- list(logLinear = logLin_sales, logQuad = logQuad_sales)
+summ_sales <- data.frame(sapply(models_sales, function(x) c(AIC(x), BIC(x))))
+row.names(summ_sales) <- c("AIC", "BIC")
+
+# inventories
+logLin_invent <- lm(linvent ~ t)
+logQuad_invent <- lm(linvent ~ t + t2)
+
+models_invent <- list(logLinear = logLin_invent, logQuad = logQuad_invent)
+summ_invent <- data.frame(sapply(models_invent, function(x) c(AIC(x), BIC(x))))
+row.names(summ_invent) <- c("AIC", "BIC")
+
+# stargazer::stargazer(logLin_sales, logQuad_sales)
+# stargazer::stargazer(logLin_invent, logQuad_invent)
+
+summ_sales
+summ_invent
+
+# --------- (b) SEASONALITY ---------
+
+## fit seasonal lm model for sales
+season_sales <- tslm(lsales ~ season + 0)
+summary(season_sales)
+plot(season_sales$coefficients, type = "l", main = "seasonal Factors for Retail Sales", 
+     xlab = "Month", ylab = "Seasonal Factor")
+
+## fit seasonal lm model for inventories
+season_invent <- tslm(linvent ~ season + 0)
+summary(season_invent)
+plot(season_invent$coefficients, type = "l", main = "Seasonal Factors for Retail Inventories", 
+     xlab = "Month", ylab = "Seasonal Factor")
+
+# check the ACF and PACF of the residual of trend models
+par(mfrow = c(2,2))
+Acf(logQuad_sales$resid, lag = 60)
+Pacf(logQuad_sales$resid, lag = 60)
+
+Acf(logQuad_invent$resid, lag = 60)
+Pacf(logQuad_invent$resid, lag = 60)
+
+# fit s-arma model for sales
+season_sales1 <- arima(logQuad_sales$resid, seasonal = list(order = c(2, 0, 0)))
+summary(season_sales1)
+ts.plot(logQuad_sales$resid, fitted(season_sales1), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values of Seasonality of Sales vs. Residual of Trend Model")
+
+# fit s-arma model for inventories
+season_invent1 <- arima(logQuad_invent$resid, seasonal = list(order = c(2, 0, 0)))
+summary(season_invent1)
+ts.plot(logQuad_invent$resid, fitted(season_invent1), gpars = list(col = c("darkblue", "darkred")), 
+        main = "Fitted values of Seasonality of Inventories vs. Residual of Trend Model")
+
+# TREND + SEASONALITY
+sT_sales1 <- arima(lsales, xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+sT_invent1 <- arima(linvent, xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+
+par(mfrow = c(2,1), mar = c(2, 4, 2, 2), oma = c(2, 2, 2, 2))
+ts.plot(lsales, fitted(sT_sales1), gpars = list(col = c("darkblue", "darkred")), ylab = "Log(sales)", 
+        main = "fitted values for trend + seasonality model vs. log(sales)")
+ts.plot(linvent, fitted(sT_invent1), gpars = list(col = c("darkblue", "darkred")), 
+        ylab = "log(inventories", 
+        main = "fitted values for trend + seasonality model vs. log(inventories)")
+
+# --------- (c) CYCLE ---------
+# check stationary
+adf.test(sT_sales1$resid, k = 36)
+adf.test(sT_invent1$resid, k = 36)
+
+# ACF and PACF plots of residuals of T+S model
+par(mfrow = c(2,2))
+Acf(sT_sales1$resid, lag = 60)
+Pacf(sT_sales1$resid, lag = 60)
+
+Acf(sT_invent1$resid, lag = 60)
+Pacf(sT_invent1$resid, lag = 60)
+
+# CYCLE
+cycle_sales <- arima(sT_sales1$resid, order = c(3, 0, 0))
+cycle_invent <- arima(sT_invent1$resid, order = c(2, 0, 0))
+
+summary(cycle_sales)
+summary(cycle_invent)
+
+par(mfrow = c(2,1), mar = c(2, 4, 2, 2), oma = c(2, 2, 2, 2))
+ts.plot(sT_sales1$resid, fitted(cycle_sales), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values of cycles of sales vs residuals of T+S model")
+ts.plot(sT_invent1$resid, fitted(cycle_invent), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values of cycles of inventories vs residuals of T+S model")
+
+# --------- (d) FULL MODEL ---------
+# TREND + SEASONALITY + CYCLE 
+tsc_sales <- Arima(lsales, order = c(3, 0, 0), xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+tsc_invent <- Arima(linvent, order = c(2, 0, 0), xreg = cbind(t, t2), seasonal = list(order = c(2, 0, 0)))
+
+
+#************ [3] MODEL DIAGNOSIS ************
+# residuals vs fitted values
+par(mfrow = c(2, 1), mar = c(2, 4, 2, 2), oma = c(2, 2, 2, 2))
+ts.plot(lsales, fitted(tsc_sales), gpars = list(col = c("darkblue", "darkred")), 
+        main = "Fitted values vs. residuals")
+plot(tsc_sales$resid, ylab = "residuals") 
+
+ts.plot(linvent, fitted(tsc_invent), gpars = list(col = c("darkblue", "darkred")),
+        main = "Fitted values vs. residuals")
+plot(tsc_invent$resid, ylab = "residuals")
+
+# ACF and PACF of residuals of full model 
+par(mfrow = c(2,2))
+Acf(tsc_sales$resid, lag = 60)
+Pacf(tsc_sales$resid, lag = 60)
+
+Acf(tsc_invent$resid, lag = 60)
+Pacf(tsc_invent$resid, lag = 60)
+
+# CUSUM
+y_sales <- strucchange::recresid(tsc_sales$resid ~ 1)
+y_invent <- strucchange::recresid(tsc_invent$resid ~ 1)
+
+plot(strucchange::efp(tsc_sales$resid ~ 1, type = "Rec-CUSUM"), main = "CUSUM of Model for Sales")
+plot(strucchange::efp(tsc_invent$resid ~ 1, type = "Rec-CUSUM"), main = "CUSUM of Model for Inventories")
+
+# recursive residuals
+plot(y_sales, pch = 16, ylab = "Recursive Residuals", 
+     main = "Recursive Residuals of Model for Sales")
+plot(y_invent, pch = 16, ylab = "Recursive Residuals", 
+     main = "Recursive Residuals of Model for Inventories")
+
+summary(tsc_sales)
+summary(tsc_invent)
+
+#************ [4] FORCAST USING FULL MODEL ************
+tf <- seq(2020.8, 2021.75, length = 12)
+tf2 <- tf^2
+
+forecast(tsc_sales, xreg = cbind(t = tf, t2 = tf2), h = 12) %>% plot()
+forecast(tsc_invent, xreg = cbind(t = tf, t2 = tf2), h = 12) %>% plot()
+
+#************ [5] VAR MODEL ************
+ts.plot(sales, inventories, gpars = list(col = c("darkblue", "darkred")), 
+        main = "Retail Sales and Retail Inventories")
+legend("topleft",legend = c("Sales","Inventories"), text.col = c("darkblue", "darkred"), bty = "n")
+
+# ccf
+ccf(lsales, linvent, ylab="Cross-Correlation Function", main = "Sales and Inventories CCF")
+
+lsi <- data.frame(cbind(lsales, linvent))
+VARselect(lsi, 20) # select var with smallest information criteria
+
+var_mod <- vars::VAR(lsi, p = 16)
+summary(var_mod)
+
+plot(var_mod)
+
+# irf
+plot(irf(var_mod, n.ahead=36))
+
+# granger-causality test
+grangertest(sales ~ inventories, order = 16)
+grangertest(inventories ~ sales, order = 16)
+
+# forecast using VAR 
+var_predict = predict(object = var_mod, n.ahead = 12)
+plot(var_predict)
+
+#************ [6] BACKTEST ARIMA ************
+compute_mape <- function(data, model_order, t, h, seasonal_order, train_length, isFixed) {
+  ###############################
+  # input:
+  #
+  # data: the data we need to model
+  # model_order: chosen arima model order
+  # t: date corresponding to data
+  # h: forecast horizon
+  # seasonal_order: chosen seasonal model order
+  # train_length: length of data to train model
+  # isFixed: boolean. True: forecast according to adding new data. False: forecast according to moving      # window.
+  ################################
+  # output:
+  #
+  # MAPE data
+  #####################
+  
+  length = length(data)
+  forecast_length = length - train_length - h + 1
+  t2 <- t ^ 2
+  result <- rep(0, length = forecast_length)
+  xreg_t = cbind(t = t, t2 = t2)
+  
+  if (isFixed == TRUE) {
+    for (i in 1: forecast_length) {
+      begin_i = 1
+      end_i = train_length + i - 1
+      model <- Arima(data[begin_i: end_i], 
+                     order = model_order, 
+                     xreg = xreg_t[begin_i: end_i, ], 
+                     seasonal = list(order = seasonal_order))
+      f_begin_i = train_length + i
+      f_end_i = train_length + i + h - 1
+      prediction <- forecast(model, h = h, xreg = matrix(xreg_t[f_begin_i: f_end_i, ], ncol = 2))
+      actual <- data[f_begin_i: f_end_i]
+      result[i] <- 100 * mean(abs((actual - prediction$mean) / actual))
+    }
+  } else {
+    for (i in 1: forecast_length) {
+      begin_i = i
+      end_i = train_length + i - 1
+      model <- Arima(data[begin_i: end_i], 
+                     order = model_order, 
+                     xreg = xreg_t[begin_i: end_i, ], 
+                     seasonal = list(order = seasonal_order))
+      f_begin_i = train_length + i
+      f_end_i = train_length + i + h - 1
+      prediction <- forecast(model, h = h, xreg = matrix(xreg_t[f_begin_i: f_end_i, ], ncol = 2))
+      actual <- data[f_begin_i: f_end_i]
+      result[i] <- 100 * mean(abs((actual - prediction$mean) / actual))
+    }
+  }
+  return(result)
+}
+
+# recursive backtesting 12-steps
+MAPE_sales12 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 12, 
+                             seasonal_order = c(2, 0, 0),   train_length = 276, isFixed = TRUE)
+
+MAPE_invent12 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 12, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = TRUE)
+
+
+plot(MAPE_sales12, type = "l", , ylab = "MAPE(%)", ylim = c(0.25, 1),
+     main = "MAPE of Sales and Invetories Using 12-step Recursive Backtesting")
+lines(MAPE_invent12, type = "l", col = "darkblue")
+legend("topright",legend = c("Sales","Inventories"), text.col = c("black", "darkblue"), bty = "n")
+
+# recursive backtesting 1-step
+MAPE_sales1 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 1, 
+                            seasonal_order = c(2, 0, 0), train_length = 276, isFixed = TRUE)
+
+MAPE_invent1 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 1, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = TRUE)
+
+plot(MAPE_sales1, type = "l", ylab = "MAPE(%)", 
+     main = "MAPE of Sales and Invetories Using 1-step Recursive Backtesting")
+lines(MAPE_invent1, type = "l", col = "darkblue")
+legend("topleft",legend = c("Sales","Inventories"), text.col = c("black", "darkblue"), bty = "n")
+
+# compare between long and short horizon
+plot(MAPE_sales12, type = "l", ylim = c(0, 1.3), main = "Recursive Backtest of Sales",
+     ylab = "MAPE(%)")
+lines(MAPE_sales1, type = "l", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("black", "black"), 
+       lty = c(1, 2), bty = "n")
+
+plot(MAPE_invent12, type = "l", col = "darkblue", ylim = c(0,1), 
+     main = "Recursive Backtest of Sales", ylab = "MAPE(%)")
+lines(MAPE_invent1, type = "l", col = "darkblue", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("darkblue", "darkblue"), 
+       lty = c(1, 2), bty = "n")
+
+
+# moving window backtesting 
+MAPE_sales_r12 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 12, 
+                             seasonal_order = c(2, 0, 0),   train_length = 276, isFixed = FALSE)
+
+MAPE_invent_r12 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 12, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = FALSE)
+
+MAPE_sales_r1 <- compute_mape(lsales, model_order = c(3, 0, 0), t = t, h = 1, 
+                            seasonal_order = c(2, 0, 0), train_length = 276, isFixed = FALSE)
+
+MAPE_invent_r1 <- compute_mape(linvent, model_order = c(2, 0, 0), t = t, h = 1, 
+                              seasonal_order = c(2, 0, 0), train_length = 276, isFixed = FALSE)
+
+plot(MAPE_sales_r12, type = "l", ylim = c(0, 1.3), main = "Moving Window Backtest of Sales",
+     ylab = "MAPE(%)")
+lines(MAPE_sales_r1, type = "l", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("black", "black"), 
+       lty = c(1, 2), bty = "n")
+
+plot(MAPE_invent_r12, type = "l", col = "darkblue", ylim = c(0,1), 
+     main = "Moving Window Backtest of Sales", ylab = "MAPE(%)")
+lines(MAPE_invent_r1, type = "l", col = "darkblue", lty = 2)
+legend("topright",legend = c("12-steps","1-step"), text.col = c("darkblue", "darkblue"), 
+       lty = c(1, 2), bty = "n")
+
+
+# compare rolling and recursive backtesting
+# all MAPE plots of sales
+plot(MAPE_sales1, type = "l", col = "blue4", ylab = "MAPE(%)", ylim = c(0,1.4), 
+     main = "MAPE of Recursive vs. Moving Window Backtesting of Sales", lty = 2)
+lines(MAPE_sales12, type = "l", col = "blue4")
+lines(MAPE_sales_r1, type = "l", col = "red4", lty = 2)
+lines(MAPE_sales_r12, type = "l", col = "red4")
+legend("topright",legend = c("1-step Recursive","12-steps Recursive",
+                             "1-step Moving Window","12-steps Moving Window"), 
+       text.col = c("blue4", "blue4", "red4", "red4"), lty = c(2, 1, 2, 1), bty = "n")
+
+# all MAPE plots of inventories
+plot(MAPE_invent1, type = "l", col = "blue4", ylab = "MAPE(%)", ylim = c(0,1), 
+     main = "MAPE of Recursive vs. Moving Window Backtesting of Inventories", lty = 2)
+lines(MAPE_invent12, type = "l", col = "blue4")
+lines(MAPE_invent_r1, type = "l", col = "red4", lty = 2)
+lines(MAPE_invent_r12, type = "l", col = "red4")
+legend("topright",legend = c("1-step Recursive","12-steps Recursive", "1-step Moving Window",
+                             "12-steps Moving Window"), 
+       text.col = c("blue4", "blue4", "red4", "red4"), lty = c(2, 1, 2, 1), bty = "n")
+```
+
+
+
+
+
+

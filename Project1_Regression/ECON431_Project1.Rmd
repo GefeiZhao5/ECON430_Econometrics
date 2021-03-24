@@ -1,0 +1,268 @@
+---
+title: "ECON 430 Project 1"
+author: "Gefei Zhao"
+date: "2020/11/9"
+output: pdf_document
+---
+```{r}
+# import data
+hp <- read.csv("C:/Users/Gefei Zhao/Desktop/UCLA/430/Project/1/new.csv", header = TRUE)
+```
+The dataset is from [Kaggle](https://www.kaggle.com/toramky/automobile-dataset).
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+# load the libraries
+library(Boruta)
+library(mice)
+library(VIM)
+library(leaps)
+library(car)
+library(corrplot)
+```
+
+# 1. Variable Selection
+## (a) Boruta Algorithm
++ Dealing with Missing Values
+```{r}
+cars[cars == "?"] <- NA # replace "?" by NAs
+matrixplot(cars) # look at the pattern of missing values
+```
+Missing values are represented by red color in the matrix plot. We can find that there are significant number of missing values in the variable "normalized.losses" and several in "num.of.doors", "broke", "stoke" and some other variables.
+
+Therefore, it is appropriate to remove the variable "normalized.losses" because most of missing values occur mainly in this variable. And we can also remove the missing oberservations in other variables because the missing value is random and would not casue bias due to the removal.
+
+```{r}
+cars <- cars[,-2] # remove the variable "normalized.losses"
+cars <- cars[complete.cases(cars),] # remove other missing values
+
+any(is.na(cars)) # check if there still have NAs in dataset
+```
+
+
++ Coverting of Data Type 
+```{r}
+str(cars)
+```
+We should convert some character variable such as price, horsepower to numeric and convert the character variables to factor variables to do the boruta algorithm.
+
+```{r warning=FALSE}
+char <- c(2:8, 14:15, 17)
+num <- c(18:19, 21:22, 25)
+cars[, 2:8] <- data.frame(apply(cars[char], 2, as.factor))
+cars[, num] <- data.frame(apply(cars[num], 2, as.numeric))
+attach(cars)
+```
+
+
++ Boruta Algorithm
+```{r}
+set.seed(1)
+boruta <- Boruta(price ~ ., data = cars)
+print(boruta)
+```
+The results indicate that the all predictors are important except number of doors.
+
+We can plot the boruta results to find top 10 important predictors.
+```{r}
+plot(boruta, xlab = "", xaxt = "n")
+
+# add the feature labels to the x axis vertically to see it clearly
+lz <- lapply(1 : ncol(boruta$ImpHistory), function(i)
+boruta$ImpHistory[is.finite(boruta$ImpHistory[, i]), i])
+names(lz) <- colnames(boruta$ImpHistory)
+Labels <- sort(sapply(lz, median))
+axis(side = 1, las=2, labels = names(Labels), at = 1:ncol(boruta$ImpHistory), cex.axis = 0.7)
+```
+**Top 10 predictors selected by Boruta Algorithm:**
+engine.size, curb.weight, horsepower, city.mpg, highway.mpg, width, length, wheel.base, fuel.system, drive.wheels 
+
+
+## (b) Mallows CP
+```{r warning=FALSE}
+reg.mod <- lm(price ~ ., data = cars)
+ss <- regsubsets(price ~ ., method = c("exhaustive"), nbest = 1, data = cars, really.big = T)
+subsets(ss, statistic = "cp", legend = F, main = "Mallows CP")
+```
+By zooming in the y axis, we can figure out the predictors choosen by Mallows CP function which are make, engine.location, width, curb.weight, num.of.cylinders, highway.mpg.
+
+## (c) Choice of Predictors
+Based on the predictors selected by above methods, I would like to select the predictors in the overlap of two results which are *width*, *curb.weight*, *highway.mpg*. Besides, I subjectly pick out from the other predictors choosed by Mallows CP and Boruta Algorithm which are *length*, *make*, *engine.location*, *horsepower*, *num.of.cylinders*, *wheel.base*
+```{r}
+var <- c('width', 'curb.weight', 'highway.mpg', 'length', 'make', 'engine.location', 
+         'horsepower', 'num.of.cylinders', 'wheel.base', 'price')
+df.cars <- subset(cars, select = var)
+attach(df.cars)
+```
+
+# 2. Univariate Analysis 
+## (a) Descriptive Analysis
++ Continous Variables
+```{r}
+# Histograms
+n <- length(cars$width); k <- 1 + log2(n)
+
+hist(price, breaks = k, col = 'skyblue4')
+par(mfrow = c(2,3))
+hist(width, breaks = k, col = 'skyblue4')
+hist(curb.weight, breaks = k, col = 'skyblue4')
+hist(highway.mpg, breaks = k, col = 'skyblue4')
+hist(length, breaks = k, col = 'skyblue4')
+hist(horsepower, breaks = k, col = 'skyblue4')
+hist(wheel.base, breaks = k, col = 'skyblue4')
+```
+
+```{r}
+# qqplots
+qqPlot(~ price, data = cars)
+par(mfrow = c(2,3))
+qqPlot(~ width, data = cars)
+qqPlot(~ curb.weight, data = cars)
+qqPlot(~ highway.mpg, data = cars)
+qqPlot(~ length, data = cars)
+qqPlot(~ horsepower, data = cars)
+qqPlot(~ wheel.base, data = cars)
+```
+
+
+```{r}
+# corelation plot
+quantitive.var <- c('width', 'curb.weight', 'highway.mpg', 'length', 'horsepower', 'wheel.base', 'price')
+quantitive.cars <- subset(cars, select = quantitive.var)
+corrplot(cor(quantitive.cars))
+```
+
+
++ Categorial Variables
+```{r}
+# bar plots
+par(mfrow = c(1,3))
+barplot(table(make))
+barplot(table(engine.location))
+barplot(table(num.of.cylinders))
+```
+
+
++ Summary Statistics
+```{r}
+psych::describe(df.cars)
+```
+
+
+## (b) Density Plots
+```{r}
+densityplot(price, col = "black")
+par(mfrow = c(2,3))
+densityPlot(width)
+densityPlot(curb.weight)
+densityPlot(highway.mpg)
+densityPlot(length)
+densityPlot(horsepower)
+densityPlot(wheel.base)
+```
+
+
+## (c) Non-linearities and Transformations
++ Identifying Non-linearities
+```{r}
+# scatterplot matrix
+scatterplotMatrix( ~ width + curb.weight + highway.mpg + length + horsepower + wheel.base + price)
+
+# scatterplots
+par(mfrow = c(2,3))
+scatterplot(price ~ width)
+scatterplot(price ~ curb.weight, data = df.cars)
+scatterplot(price ~ highway.mpg, data = df.cars)
+scatterplot(price ~ length, data = df.cars)
+scatterplot(price ~ horsepower, data = df.cars)
+scatterplot(price ~ wheel.base, data = df.cars)
+```
+
+
++ Testing For Transformation
+```{r}
+summary(p1 <- powerTransform(cbind(width, curb.weight, highway.mpg, length, horsepower, 
+                                   wheel.base, price) ~ 1, data = df.cars, family = "bcPower"))
+testTransform(p1, c(-5, 0, 0, 2, 0, -1, 0))
+testTransform(p1, c(-5, -0.5, 0, 2, -0.5, -1, -0.5))
+```
+
+```{r}
+transformed <- bcPower(with(df.cars, cbind(width, curb.weight, highway.mpg, length, horsepower, wheel.base, price)), coef(p1, round = T))
+scatterplotMatrix(transformed)
+```
+
+```{r}
+scatterplot(bcPower(price, -0.5) ~ log(width))
+
+```
+
+## (d) Outliers and/or Unusual Features
+```{r}
+par(mfrow = c(2,4))
+Boxplot( ~ price, df.cars)
+Boxplot( ~ width, df.cars)
+Boxplot( ~ curb.weight, df.cars)
+Boxplot( ~ highway.mpg, df.cars)
+Boxplot( ~ length, df.cars)
+Boxplot( ~ horsepower, df.cars)
+Boxplot( ~ wheel.base, df.cars)
+
+par(mfrow = c(1,3))
+Boxplot(price ~ make, df.cars)
+Boxplot(price ~ engine.location, df.cars)
+Boxplot(price ~ num.of.cylinders, df.cars)
+```
+
+## (e) Missing Values
+We already done this question in part 1, variable selection because Boruta Algorithm requires no-missing value datasets.
+
+
+# 3. Model Building
+
+## (a) Evaluate Transformations of Variables
+```{r}
+par(mfrow = c(1,2))
+# before transformation
+qqPlot(lm(price ~ width +  curb.weight +  highway.mpg +  length + horsepower +  wheel.base
+          +engine.location + make, 
+       data = df.cars), envelope = 0.99, ylab = "Regression Before Transformation")
+
+# after transformation
+qqPlot(lm(bcPower(price, -0.5) ~ log(width) +  bcPower(curb.weight,-0.5) + highway.mpg 
+          + bcPower(length, 2) + bcPower(horsepower, -1) +  bcPower(wheel.base, -0.5) +
+            engine.location + make, 
+       data = df.cars), envelope = 0.99, ylab = "Regression After Transformation")
+```
+
+## (b) Modelling and Improvement
+### Simple Model with Transformed Variables
+```{r}
+mod1 <- lm(bcPower(price, -0.5) ~ log(width) +  bcPower(curb.weight,-0.5) + highway.mpg 
+          + bcPower(length, 2) + bcPower(horsepower, -1) +  bcPower(wheel.base, -0.5) +
+            engine.location + make + num.of.cylinders, data = df.cars)
+summary(mod1)
+
+```
+
+
+### Model Specification (Nonlinear Predictors)
+
+### Removing Outliers 
+
+## (c) Test for Multicollinearity
+
+## (d) Test for Heteroskedasticity
+
+## (e) Model Selection
+
+## (f) Overall Findings of the Preferred Model
+
+## (g) Model Evaluation
+
+### Robustness Test (Boostrapping)
+
+### Five-fold Cross-Validation
+
+### Training and Testing
+
+
